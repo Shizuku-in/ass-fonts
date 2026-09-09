@@ -27,7 +27,10 @@ fn request(weight: u16, italic: bool) -> FontReference {
 fn options(bold: bool) -> ResolveOptions {
     ResolveOptions {
         weight_matching: WeightMatching::Nearest,
-        synthesis: SynthesisPolicy { bold },
+        synthesis: SynthesisPolicy {
+            bold,
+            italic: false,
+        },
     }
 }
 

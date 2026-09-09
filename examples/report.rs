@@ -6,6 +6,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while let Some(arg) = args.peek() {
         if arg == "--allow-style-synthesis" {
             options.synthesis.bold = true;
+            options.synthesis.italic = true;
         } else if arg == "--nearest-weight" {
             options.weight_matching = WeightMatching::Nearest;
         } else if arg == "--" {

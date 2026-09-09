@@ -34,13 +34,13 @@ Run the JSON report example:
 cargo run --example report -- movie.ass ./fonts
 ```
 
-To allow renderer-side style synthesis when collecting fonts (currently bold only):
+To allow renderer-side style synthesis when collecting fonts (bold and italic):
 
 ```rust
 let report = index.resolve_with_options(
     &subtitle.references,
     ass_fonts::ResolveOptions {
-        synthesis: ass_fonts::SynthesisPolicy { bold: true },
+        synthesis: ass_fonts::SynthesisPolicy { bold: true, italic: true },
         ..Default::default()
     },
 );
@@ -50,7 +50,7 @@ let report = index.resolve_with_options(
 cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 ```
 
-`ResolveOptions` separates weight selection (`WeightMatching::Exact` by default, or `Nearest`) from synthesis (`bold`, off by default). `resolve` uses these defaults; `resolve_with_mode` remains a compatibility wrapper. Synthesis first prefers exact family matches, then permits a weight 400 face for a weight 700 request with the same italic state. Multiple eligible faces remain ambiguous. `matches[].synthetic_bold: true` marks candidates requiring emboldening. No font file is generated; rendering and visual quality are not verified.
+`ResolveOptions` separates weight selection (`WeightMatching::Exact` by default, or `Nearest`) from synthesis (`bold` and `italic`, both off by default). `resolve` uses these defaults; `resolve_with_mode` remains a compatibility wrapper. Selection first tries native slant with exact weight, optional nearest weight, then permitted 400→700 bold fallback. If no candidate remains, italic permission allows an italic request to repeat weight selection among upright faces. Upright requests never fall back to italic faces. Multiple eligible faces remain ambiguous. `matches[].synthetic_bold` and `synthetic_italic` independently mark required synthesis. The CLI `--allow-style-synthesis` and `ResolveMode::AllowStyleSynthesis` enable both; use `SynthesisPolicy` to allow only one. No font file is generated; rendering and visual quality are not verified.
 
 
 To enable nearest-weight selection independently of synthesis:
@@ -100,11 +100,11 @@ Matching uses internal family, full, PostScript, and related names, normalized w
 
 References are grouped by name, weight, and italic state. Normal/bold map to 400/700; explicit `\b100`–`\b900` weights are retained. PostScript names take priority. Full names identify specific faces unless they also denote a generic family. Legacy family aliases can identify variants when a broader typographic family is recorded and all matching faces share the same weight/italic attributes. This uses name-table relationships, not suffixes such as Bold or W17.
 
-Generic families use the configured weight policy and require matching italic attributes (oblique counts as italic). Insufficient metadata keeps the conservative family interpretation. Specific names preserve the face's native design even when the request says 400; this resolves a font dependency, not the accuracy of the requested visual style. Requested and native attributes remain in the report. Duplicate matching files remain ambiguous. Italic synthesis is not yet implemented.
+Generic families use the configured weight policy and prefer matching italic attributes (oblique counts as italic). Insufficient metadata keeps the conservative family interpretation. Specific names preserve the face's native design even when the request says 400; this resolves a font dependency, not the accuracy of the requested visual style. Requested and native attributes remain in the report. Duplicate matching files remain ambiguous. Italic synthesis requires explicit permission.
 
 `read_subtitle` accepts UTF-8 and BOM-marked UTF-16 LE/BE. For legacy encodings, decode the text first and pass it to `extract_fonts`.
 
-This library does not simulate rendering, check glyph coverage, generate synthesized fonts, instantiate variable fonts, resolve cross-family font fallback, extract embedded fonts, or discover system font directories. The optional synthetic-bold policy supports only 400→700, with no italic synthesis or Light fallback. Supply font paths explicitly and check diagnostics for incomplete results.
+This library does not simulate rendering, check glyph coverage, generate synthesized fonts, instantiate variable fonts, resolve cross-family font fallback, extract embedded fonts, or discover system font directories. Synthetic bold supports only 400→700; italic synthesis permits upright→italic. These permissions may combine and do not alter font files. Light faces are not used for synthetic bold. Supply font paths explicitly and check diagnostics for incomplete results.
 
 ## Development
 

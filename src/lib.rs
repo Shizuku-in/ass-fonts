@@ -17,7 +17,7 @@
 //! let index = FontIndex::new(scan.faces);
 //! let report = index.resolve_with_options(&subtitle.references, ResolveOptions {
 //!     weight_matching: WeightMatching::Nearest,
-//!     synthesis: SynthesisPolicy { bold: true },
+//!     synthesis: SynthesisPolicy { bold: true, italic: true },
 //! });
 //! println!("{} resolved, {} missing, {} ambiguous",
 //!     report.resolved.len(), report.missing.len(), report.ambiguous.len());
@@ -32,7 +32,7 @@
 //!
 //! Specific font names locate faces; generic family names use weight and italic
 //! attributes. Defaults require exact family attributes and disable synthesis.
-//! Nearest-weight selection and synthetic-bold permission are independent options.
+//! Nearest-weight selection, bold synthesis, and italic synthesis are independent options.
 //! See [`FontIndex::resolve_with_options`] for selection precedence.
 //!
 //! A resolved dependency identifies a font file, not a guarantee of visual fidelity.

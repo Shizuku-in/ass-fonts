@@ -34,13 +34,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 cargo run --example report -- movie.ass ./fonts
 ```
 
-收集字体时，可允许由渲染器合成样式（目前仅支持粗体）：
+收集字体时，可允许由渲染器合成样式（粗体和斜体）：
 
 ```rust
 let report = index.resolve_with_options(
     &subtitle.references,
     ass_fonts::ResolveOptions {
-        synthesis: ass_fonts::SynthesisPolicy { bold: true },
+        synthesis: ass_fonts::SynthesisPolicy { bold: true, italic: true },
         ..Default::default()
     },
 );
@@ -50,7 +50,7 @@ let report = index.resolve_with_options(
 cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 ```
 
-`ResolveOptions` 将字重选择（默认 `WeightMatching::Exact`，可选 `Nearest`）与合成能力（`bold`，默认关闭）分开。`resolve` 使用默认选项，`resolve_with_mode` 保留为兼容入口。合成策略优先选择精确匹配的家族变体，再允许斜体状态相同的 400 字重字体满足 700 字重请求。多个合适候选仍返回歧义。`matches[].synthetic_bold: true` 标记需要加粗的候选。本库不生成字体文件，也未验证实际渲染效果。
+`ResolveOptions` 将字重选择（默认 `WeightMatching::Exact`，可选 `Nearest`）与合成能力（`bold`、`italic`，默认均关闭）分开。`resolve` 使用默认选项，`resolve_with_mode` 保留为兼容入口。先在原生倾斜状态中依次尝试精确字重、可选字重择近、允许的 400→700 粗体回退；仍无候选时，斜体权限允许斜体请求在直立字体中重复字重选择。直立请求不会反向回退到斜体。多个合适候选仍返回歧义。`matches[].synthetic_bold` 和 `synthetic_italic` 分别标记需要的合成。CLI `--allow-style-synthesis` 和 `ResolveMode::AllowStyleSynthesis` 同时允许两种合成；使用 `SynthesisPolicy` 可单独开启其中一种。本库不生成字体文件，也未验证实际渲染效果。
 
 
 字重择近可独立开启，不自动允许样式合成：
@@ -100,11 +100,11 @@ cargo run --example report -- --nearest-weight --allow-style-synthesis movie.ass
 
 引用按名称、字重和斜体状态分组。普通体/粗体对应 400/700，保留 `\b100`–`\b900` 指定的字重。PostScript 名优先；完整名称用于定位具体 face，但与通用家族名重合时仍按家族处理。传统家族别名具有更广的排印家族记录、且命中的 face 字重/斜体属性一致时，也可定位具体变体。判断依据是名称表关系，不解析 Bold、W17 等后缀。
 
-通用家族按配置选择字重，并要求斜体属性一致（oblique 也视为斜体）；元数据不足时保守地按家族处理。具体名称保留字体的原生设计，不因请求为 400 而拒绝匹配；这表示字体依赖已定位，不保证请求的视觉样式已满足。报告保留请求与实际属性，同名多个文件仍返回歧义。斜体合成尚未实现。
+通用家族按配置选择字重，并优先匹配斜体属性（oblique 也视为斜体）；元数据不足时保守地按家族处理。具体名称保留字体的原生设计，不因请求为 400 而拒绝匹配；这表示字体依赖已定位，不保证请求的视觉样式已满足。报告保留请求与实际属性，同名多个文件仍返回歧义。斜体合成需要显式允许。
 
 `read_subtitle` 支持 UTF-8 和带 BOM 的 UTF-16 LE/BE。传统编码字幕请先解码，再传入 `extract_fonts`。
 
-本库不模拟渲染、不检查字形覆盖、不生成合成字体、不实例化可变字体、不处理跨家族字体回退、不提取内嵌字体，也不自动发现系统字体目录。可选粗体合成策略仅支持 400→700，不合成斜体，也不回退到 Light 字体。请显式提供字体路径，并检查诊断以了解结果是否完整。
+本库不模拟渲染、不检查字形覆盖、不生成合成字体、不实例化可变字体、不处理跨家族字体回退、不提取内嵌字体，也不自动发现系统字体目录。粗体合成仅支持 400→700，斜体合成支持直立→斜体；两种权限可组合，不修改字体文件。粗体合成不会使用 Light 字体。请显式提供字体路径，并检查诊断以了解结果是否完整。
 
 ## 开发
 

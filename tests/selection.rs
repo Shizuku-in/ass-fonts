@@ -163,7 +163,10 @@ fn options_and_compatibility_mode_agree() {
     let refs = [request("Common", 700)];
     let options = ResolveOptions {
         weight_matching: WeightMatching::Exact,
-        synthesis: SynthesisPolicy { bold: true },
+        synthesis: SynthesisPolicy {
+            bold: true,
+            italic: true,
+        },
     };
     let report = index.resolve_with_options(&refs, options);
     assert_eq!(

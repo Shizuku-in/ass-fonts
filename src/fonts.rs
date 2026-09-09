@@ -234,6 +234,9 @@ pub struct MatchEvidence {
     /// False does not guarantee visual fidelity or that a renderer will not synthesize.
     /// No font is generated and actual rendering is not checked.
     pub synthetic_bold: bool,
+    /// True when italic synthesis is permitted and an italic request selects an
+    /// upright face. No glyphs are transformed by this library.
+    pub synthetic_italic: bool,
     /// How this candidate was selected, independently of the synthesis flag.
     pub selection_method: SelectionMethod,
 }
@@ -250,9 +253,9 @@ pub enum SelectionMethod {
     LegacyFamilyName,
     /// Family candidate with exact requested weight and italic state.
     FamilyExact,
-    /// Family candidate at minimum weight distance, with matching italic state.
+    /// Family candidate at minimum weight distance in the selected slant tier.
     FamilyNearest,
-    /// Exact-weight selection failed; the permitted 400→700 fallback selected this face.
+    /// A permitted bold or italic fallback selected this face without weight approximation.
     FamilySynthesis,
     /// An alias without a more specific selection classification.
     InternalName,
@@ -266,7 +269,7 @@ pub enum WeightMatching {
     #[default]
     /// Require numeric equality. Separate synthesis permission can still allow fallback.
     Exact,
-    /// Minimum absolute weight difference among same-family, same-italic faces.
+    /// Minimum absolute weight difference among faces in the selected family/slant tier.
     /// All equally close faces are retained; there is no distance cutoff.
     /// Exact matches are preferred and reported as [`SelectionMethod::FamilyExact`].
     /// This absolute-distance policy does not emulate CSS or a specific renderer.
@@ -278,9 +281,12 @@ pub enum WeightMatching {
 /// Permission records a dependency on synthesis; this library does not alter glyphs.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SynthesisPolicy {
-    /// Permit weight 400 to satisfy weight 700 when italic state agrees.
-    /// No other weight conversions or italic synthesis are implemented.
+    /// Permit weight 400 to satisfy weight 700. Can combine with italic synthesis.
+    /// No other synthetic weight conversions are implemented.
     pub bold: bool,
+    /// Permit an upright face for an italic request if no native-italic candidate
+    /// satisfies the weight policy. Never substitutes italic for upright text.
+    pub italic: bool,
 }
 
 /// Independent controls for family weight selection and style synthesis.
@@ -292,7 +298,7 @@ pub struct SynthesisPolicy {
 /// use ass_fonts::{ResolveOptions, SynthesisPolicy, WeightMatching};
 /// let options = ResolveOptions {
 ///     weight_matching: WeightMatching::Nearest,
-///     synthesis: SynthesisPolicy { bold: true },
+///     synthesis: SynthesisPolicy { bold: true, italic: true },
 /// };
 /// assert_eq!(options.weight_matching, WeightMatching::Nearest);
 /// assert!(!ResolveOptions::default().synthesis.bold);
@@ -310,6 +316,7 @@ impl From<ResolveMode> for ResolveOptions {
         Self {
             synthesis: SynthesisPolicy {
                 bold: mode == ResolveMode::AllowStyleSynthesis,
+                italic: mode == ResolveMode::AllowStyleSynthesis,
             },
             ..Self::default()
         }
@@ -326,8 +333,7 @@ pub enum ResolveMode {
     #[default]
     /// Exact family matching with synthesis disabled.
     Strict,
-    /// Allow renderer-side style synthesis. Currently only bold is supported:
-    /// weight 400 faces for weight 700 requests, keeping italic unchanged.
+    /// Allow both renderer-side bold (400→700) and italic (upright→italic) synthesis.
     /// Exact family matches always take precedence. This is a collection policy,
     /// not an emulation of a particular renderer's font selection algorithm.
     AllowStyleSynthesis,
@@ -504,7 +510,7 @@ impl FontIndex {
     }
 
     /// Resolve with an explicit policy. Synthetic bold uses only weight 400 for
-    /// weight 700, never a Light face or a mismatched italic variant. Tied normal
+    /// weight 700, never a Light face. Italic synthesis allows upright faces. Tied normal
     /// faces remain ambiguous. Specific-name matches keep their existing face
     /// selection, and are marked if this same synthesis rule applies.
     pub fn resolve_with_mode(
@@ -518,7 +524,7 @@ impl FontIndex {
     /// PostScript names have priority. Full names override legacy family aliases
     /// only when name-table relationships distinguish them from generic families.
     /// With insufficient metadata, family interpretation is retained.
-    /// Nearest weight selection, when enabled, precedes synthesis. It does not
+    /// Within each slant tier, nearest weight selection precedes bold fallback. It does not
     /// itself enable synthesis or change the matching of specific names.
     ///
     /// # Selection order
@@ -528,7 +534,9 @@ impl FontIndex {
     /// 3. A legacy family alias can locate a variant when a broader typographic
     ///    family exists and all matching faces agree on weight and italic state.
     /// 4. Generic families use exact attributes, then optional nearest weight,
-    ///    then optional synthetic-bold fallback. Italic state must always agree.
+    ///    then optional synthetic-bold fallback in the native slant tier. If no
+    ///    candidate remains and italic synthesis is permitted, repeat weight
+    ///    selection among upright faces for an italic request. Never reverse this.
     /// 5. Remaining untyped aliases locate their associated faces directly.
     ///
     /// Missing or conflicting name-table metadata keeps the conservative family
@@ -618,11 +626,52 @@ impl FontIndex {
                     .into_iter()
                     .flatten()
                     .map(|&i| &self.faces[i])
-                    .filter(|face| needs_synthetic_bold(reference, face))
+                    .filter(|face| {
+                        face.italic == reference.italic && needs_synthetic_bold(reference, face)
+                    })
                     .cloned()
                     .collect();
                 if !candidates.is_empty() {
                     method = SelectionMethod::FamilySynthesis;
+                }
+            }
+            if candidates.is_empty() && family_match && options.synthesis.italic && reference.italic
+            {
+                let upright: Vec<_> = family
+                    .into_iter()
+                    .flatten()
+                    .map(|&i| &self.faces[i])
+                    .filter(|face| !face.italic)
+                    .collect();
+                candidates = upright
+                    .iter()
+                    .filter(|face| face.weight == reference.weight)
+                    .map(|face| (*face).clone())
+                    .collect();
+                if !candidates.is_empty() {
+                    method = SelectionMethod::FamilySynthesis;
+                } else if options.weight_matching == WeightMatching::Nearest {
+                    if let Some(distance) = upright
+                        .iter()
+                        .map(|face| face.weight.abs_diff(reference.weight))
+                        .min()
+                    {
+                        candidates = upright
+                            .iter()
+                            .filter(|face| face.weight.abs_diff(reference.weight) == distance)
+                            .map(|face| (*face).clone())
+                            .collect();
+                        method = SelectionMethod::FamilyNearest;
+                    }
+                } else if options.synthesis.bold {
+                    candidates = upright
+                        .into_iter()
+                        .filter(|face| needs_synthetic_bold(reference, face))
+                        .cloned()
+                        .collect();
+                    if !candidates.is_empty() {
+                        method = SelectionMethod::FamilySynthesis;
+                    }
                 }
             }
             let count = candidates.len();
@@ -646,7 +695,11 @@ impl FontIndex {
                     path: face.path.clone(),
                     face_index: face.face_index,
                     selection_method: method,
-                    synthetic_bold: options.synthesis.bold && needs_synthetic_bold(reference, face),
+                    synthetic_bold: options.synthesis.bold
+                        && needs_synthetic_bold(reference, face)
+                        && (face.italic == reference.italic
+                            || (options.synthesis.italic && reference.italic && !face.italic)),
+                    synthetic_italic: options.synthesis.italic && reference.italic && !face.italic,
                     matched_names: face
                         .name_records
                         .iter()
@@ -690,5 +743,5 @@ impl FontIndex {
 }
 
 fn needs_synthetic_bold(reference: &FontReference, face: &FontFace) -> bool {
-    reference.weight == 700 && face.weight == 400 && reference.italic == face.italic
+    reference.weight == 700 && face.weight == 400
 }
