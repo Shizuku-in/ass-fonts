@@ -1,0 +1,16 @@
+[package]
+name = "ass-fonts"
+version = "0.1.0"
+edition = "2024"
+description = "Analyze and resolve font dependencies in ASS/SSA subtitles."
+license = "MIT"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+ttf-parser = "0.25.1"
+unicode-normalization = "0.1"
+walkdir = "2"
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
