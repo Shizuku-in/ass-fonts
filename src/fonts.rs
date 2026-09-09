@@ -192,6 +192,7 @@ pub enum SelectionMethod {
     FullName,
     LegacyFamilyName,
     FamilyExact,
+    FamilyNearest,
     FamilySynthesis,
     InternalName,
 }
@@ -202,6 +203,9 @@ pub enum SelectionMethod {
 pub enum WeightMatching {
     #[default]
     Exact,
+    /// Minimum absolute weight difference among same-family, same-italic faces.
+    /// All equally close faces are retained; there is no distance cutoff.
+    Nearest,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -396,6 +400,8 @@ impl FontIndex {
     /// PostScript names have priority. Full names override legacy family aliases
     /// only when name-table relationships distinguish them from generic families.
     /// With insufficient metadata, family interpretation is retained.
+    /// Nearest weight selection, when enabled, precedes synthesis. It does not
+    /// itself enable synthesis or change the matching of specific names.
     pub fn resolve_with_options(
         &self,
         references: &[FontReference],
@@ -443,6 +449,28 @@ impl FontIndex {
                 })
                 .map(|&i| self.faces[i].clone())
                 .collect::<Vec<_>>();
+            if candidates.is_empty()
+                && family_match
+                && options.weight_matching == WeightMatching::Nearest
+            {
+                let eligible = || {
+                    family
+                        .into_iter()
+                        .flatten()
+                        .map(|&i| &self.faces[i])
+                        .filter(|face| face.italic == reference.italic)
+                };
+                if let Some(distance) = eligible()
+                    .map(|face| face.weight.abs_diff(reference.weight))
+                    .min()
+                {
+                    candidates = eligible()
+                        .filter(|face| face.weight.abs_diff(reference.weight) == distance)
+                        .cloned()
+                        .collect();
+                    method = SelectionMethod::FamilyNearest;
+                }
+            }
             if candidates.is_empty() && family_match && options.synthesis.bold {
                 candidates = family
                     .into_iter()
@@ -491,6 +519,7 @@ impl FontIndex {
                                         r.kind == NameKind::Family && r.name_id == Some(1)
                                     }
                                     SelectionMethod::FamilyExact
+                                    | SelectionMethod::FamilyNearest
                                     | SelectionMethod::FamilySynthesis => {
                                         r.kind == NameKind::Family
                                     }

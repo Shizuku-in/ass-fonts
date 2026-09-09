@@ -50,7 +50,27 @@ let report = index.resolve_with_options(
 cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 ```
 
-`ResolveOptions` 将字重选择（目前仅有 `WeightMatching::Exact`）与合成能力（`bold`，默认关闭）分开。`resolve` 使用默认选项，`resolve_with_mode` 保留为兼容入口。合成策略优先选择精确匹配的家族变体，再允许斜体状态相同的 400 字重字体满足 700 字重请求。多个合适候选仍返回歧义。`matches[].synthetic_bold: true` 标记需要加粗的候选。本库不生成字体文件，也未验证实际渲染效果。
+`ResolveOptions` 将字重选择（默认 `WeightMatching::Exact`，可选 `Nearest`）与合成能力（`bold`，默认关闭）分开。`resolve` 使用默认选项，`resolve_with_mode` 保留为兼容入口。合成策略优先选择精确匹配的家族变体，再允许斜体状态相同的 400 字重字体满足 700 字重请求。多个合适候选仍返回歧义。`matches[].synthetic_bold: true` 标记需要加粗的候选。本库不生成字体文件，也未验证实际渲染效果。
+
+
+字重择近可独立开启，不自动允许样式合成：
+
+```rust
+let report = index.resolve_with_options(
+    &subtitle.references,
+    ass_fonts::ResolveOptions {
+        weight_matching: ass_fonts::WeightMatching::Nearest,
+        ..Default::default()
+    },
+);
+```
+
+```sh
+cargo run --example report -- --nearest-weight movie.ass ./fonts
+cargo run --example report -- --nearest-weight --allow-style-synthesis movie.ass ./fonts
+```
+
+`Nearest` 优先精确匹配，否则在同一家族、相同斜体状态下选择字重绝对差值最小者。等距离及重复 face 保留歧义，不设距离上限；具体名称的定位规则不变。选择字体后独立判断合成：700→693 标记 `family_nearest`，不标记合成粗体；700→400 仅在显式允许合成时标记合成粗体。JSON 示例现在输出完整 `options` 对象，替代原来的 `mode` 字段。
 
 每个条目包含 `candidates` 和 `matches`（每个候选对应一条匹配依据）。缺失条目的候选及匹配依据为空，并附带：
 
@@ -61,7 +81,7 @@ cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 
 `matches[].matched_names` 保留命中的原始内部名称及 `kind`：`family`、`full_name` 或 `post_script_name`。调用方提供的名称若没有类型信息，标为 `internal_name`。已有变体仅供参考，不作为回退选择。成功和歧义条目省略 `missing_reason`。
 
-扫描名称保留原始 `name_id`。每个匹配记录包含 `selection_method`：`post_script_name`、`full_name`、`legacy_family_name`、`family_exact`、`family_synthesis` 或 `internal_name`。
+扫描名称保留原始 `name_id`。每个匹配记录包含 `selection_method`：`post_script_name`、`full_name`、`legacy_family_name`、`family_exact`、`family_nearest`、`family_synthesis` 或 `internal_name`。
 
 例如，JSON 报告中的名称缺失条目：
 
@@ -80,11 +100,11 @@ cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 
 引用按名称、字重和斜体状态分组。普通体/粗体对应 400/700，保留 `\b100`–`\b900` 指定的字重。PostScript 名优先；完整名称用于定位具体 face，但与通用家族名重合时仍按家族处理。传统家族别名具有更广的排印家族记录、且命中的 face 字重/斜体属性一致时，也可定位具体变体。判断依据是名称表关系，不解析 Bold、W17 等后缀。
 
-通用家族要求字重和斜体精确匹配（oblique 也视为斜体）；元数据不足时保守地按家族处理。具体名称保留字体的原生设计，不因请求为 400 而拒绝匹配；这表示字体依赖已定位，不保证请求的视觉样式已满足。报告保留请求与实际属性，同名多个文件仍返回歧义。字重择近和斜体合成尚未实现。
+通用家族按配置选择字重，并要求斜体属性一致（oblique 也视为斜体）；元数据不足时保守地按家族处理。具体名称保留字体的原生设计，不因请求为 400 而拒绝匹配；这表示字体依赖已定位，不保证请求的视觉样式已满足。报告保留请求与实际属性，同名多个文件仍返回歧义。斜体合成尚未实现。
 
 `read_subtitle` 支持 UTF-8 和带 BOM 的 UTF-16 LE/BE。传统编码字幕请先解码，再传入 `extract_fonts`。
 
-本库不模拟渲染、不检查字形覆盖、不生成合成字体、不选择最近字重、不实例化可变字体、不处理跨家族字体回退、不提取内嵌字体，也不自动发现系统字体目录。可选粗体合成策略仅支持 400→700，不合成斜体，也不回退到 Light 字体。请显式提供字体路径，并检查诊断以了解结果是否完整。
+本库不模拟渲染、不检查字形覆盖、不生成合成字体、不实例化可变字体、不处理跨家族字体回退、不提取内嵌字体，也不自动发现系统字体目录。可选粗体合成策略仅支持 400→700，不合成斜体，也不回退到 Light 字体。请显式提供字体路径，并检查诊断以了解结果是否完整。
 
 ## 开发
 
