@@ -1,7 +1,44 @@
 //! Extract fonts used by ASS/SSA dialogue and resolve them using font name tables.
 //!
-//! Family matches use weight and italic attributes; glyph coverage and
-//! renderer-specific fallback are outside this library's scope.
+//! # Workflow
+//!
+//! 1. Read a subtitle with [`read_subtitle`], or parse decoded text with [`extract_fonts`].
+//! 2. Scan explicit font files or directories with [`ScanReport::scan`].
+//! 3. Build a reusable [`FontIndex`] and resolve references with [`ResolveOptions`].
+//! 4. Inspect [`ResolveReport`] together with subtitle and scanning diagnostics.
+//!
+//! ```no_run
+//! use ass_fonts::{FontIndex, ResolveOptions, ScanReport, SynthesisPolicy,
+//!                 WeightMatching, read_subtitle};
+//!
+//! # fn main() -> std::io::Result<()> {
+//! let subtitle = read_subtitle("movie.ass")?;
+//! let scan = ScanReport::scan(["./fonts"]);
+//! let index = FontIndex::new(scan.faces);
+//! let report = index.resolve_with_options(&subtitle.references, ResolveOptions {
+//!     weight_matching: WeightMatching::Nearest,
+//!     synthesis: SynthesisPolicy { bold: true },
+//! });
+//! println!("{} resolved, {} missing, {} ambiguous",
+//!     report.resolved.len(), report.missing.len(), report.ambiguous.len());
+//! // Successful matching does not imply that every input was parsed or scanned.
+//! eprintln!("{:?}", subtitle.diagnostics);
+//! eprintln!("{:?}", scan.issues);
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Matching and limits
+//!
+//! Specific font names locate faces; generic family names use weight and italic
+//! attributes. Defaults require exact family attributes and disable synthesis.
+//! Nearest-weight selection and synthetic-bold permission are independent options.
+//! See [`FontIndex::resolve_with_options`] for selection precedence.
+//!
+//! A resolved dependency identifies a font file, not a guarantee of visual fidelity.
+//! Glyph coverage, rendering, cross-family fallback, variable-font instances,
+//! embedded font extraction, and system font directory discovery are outside scope.
+//! Reports implement [`serde::Serialize`]; enum values use snake_case in JSON.
 mod fonts;
 mod subtitle;
 
@@ -12,7 +49,17 @@ pub use fonts::{
 };
 pub use subtitle::{Diagnostic, FontReference, SubtitleFonts, extract_fonts, read_subtitle};
 
-/// Normalize a font name for matching. ASS's vertical-font prefix is ignored.
+/// Normalize a font name for exact alias comparison.
+///
+/// Trims outer whitespace, removes leading ASS vertical-font `@` prefixes, applies
+/// Unicode NFKC and lowercase conversion, then collapses whitespace to single
+/// spaces. This is neither fuzzy matching nor complete Unicode case folding.
+/// Punctuation and meaningful internal spaces are preserved.
+///
+/// ```
+/// assert_eq!(ass_fonts::normalize_name("  @ＥＸＡＭＰＬＥ  Sans  "), "example sans");
+/// assert_eq!(ass_fonts::normalize_name("@@"), "");
+/// ```
 pub fn normalize_name(name: &str) -> String {
     use unicode_normalization::UnicodeNormalization;
     name.trim()

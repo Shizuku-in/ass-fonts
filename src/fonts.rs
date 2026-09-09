@@ -6,56 +6,100 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A collection face is identified by both its canonical path and index.
+/// Owned metadata for one face in a font file or collection.
+///
+/// Identity is `(path, face_index)`, not the name or file contents. No font bytes
+/// are retained. Scanned names include Unicode records and Macintosh Roman ASCII;
+/// unsupported legacy encodings are skipped.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FontFace {
+    /// Canonical file path when produced by [`ScanReport::scan`].
     pub path: PathBuf,
+    /// Zero-based collection index; standalone TTF/OTF files use zero.
     pub face_index: u32,
+    /// All decoded matching aliases, sorted and deduplicated by the scanner.
     pub names: Vec<String>,
     /// Family aliases (name IDs 1/16/21), used for weight/italic filtering.
     pub family_names: Vec<String>,
     /// Typed internal names for reporting match provenance. Untyped `names`
     /// supplied by callers are reported as `internal_name`.
     pub name_records: Vec<FontName>,
+    /// Native numeric weight from the parser (normally 1–1000); 400 if OS/2 is absent.
+    /// This value is not changed by matching or synthesis.
     pub weight: u16,
     /// Includes fonts marked as oblique.
     pub italic: bool,
 }
 
+/// Semantic role of an internal alias; related OpenType IDs share a role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NameKind {
+    /// Legacy, typographic, or WWS family (IDs 1, 16, 21).
     Family,
+    /// Full or compatible full name (IDs 4, 18).
     FullName,
+    /// PostScript name (ID 6).
     PostScriptName,
+    /// Caller-supplied alias without known name-table provenance.
     InternalName,
 }
 
+/// An original decoded alias and its classification.
+///
+/// For caller-built records, keep `kind` consistent with `name_id`, or use
+/// `name_id: None` when the original ID is unknown. The index does not validate
+/// contradictory caller-supplied metadata.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct FontName {
+    /// Original decoded spelling, before matching normalization.
     pub name: String,
+    /// Name role used for selection and evidence reporting.
     pub kind: NameKind,
     /// Original OpenType name ID; absent for caller-supplied aliases.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name_id: Option<u16>,
 }
 
+/// A filesystem or face parsing problem encountered while scanning.
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanIssue {
+    /// Affected file or directory; canonicalization may not have succeeded.
     pub path: PathBuf,
+    /// Affected face, or `None` for a filesystem or collection-level failure.
     pub face_index: Option<u32>,
+    /// Human-readable error, not a stable machine-readable code.
     pub message: String,
 }
 
+/// Successfully parsed faces and non-fatal scan issues.
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct ScanReport {
+    /// Faces sorted by canonical path and collection index.
     pub faces: Vec<FontFace>,
+    /// Problems encountered; inspect even when matching reports no missing fonts.
     pub issues: Vec<ScanIssue>,
 }
 
 impl ScanReport {
     /// Recursively scan explicit files/directories; do not follow directory symlinks.
     /// Unreadable and invalid files are reported without aborting the scan.
+    ///
+    /// Accepts TTF/OTF/TTC/OTC extensions case-insensitively, and scans every
+    /// collection face. Canonical paths deduplicate overlapping roots and file
+    /// symlinks. Other extensions are ignored. No system directories are added.
+    ///
+    /// Each file is read fully into memory, then released after metadata extraction.
+    /// A parsed face without usable names is retained and produces an issue.
+    /// Nonexistent roots and traversal errors also populate [`Self::issues`].
+    ///
+    /// ```no_run
+    /// let scan = ass_fonts::ScanReport::scan(["./fonts", "./extra/font.ttc"]);
+    /// for face in &scan.faces {
+    ///     println!("{}#{}: {:?}", face.path.display(), face.face_index, face.names);
+    /// }
+    /// assert!(scan.issues.is_empty(), "{:?}", scan.issues);
+    /// ```
     pub fn scan<I, P>(roots: I) -> Self
     where
         I: IntoIterator<Item = P>,
@@ -167,55 +211,97 @@ impl ScanReport {
     }
 }
 
+/// Why no candidate could be selected under the requested options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MissingReason {
+    /// No normalized internal alias matched the requested name.
     NameNotFound,
+    /// The family exists, but no face satisfies the current weight/italic policy.
     StyleNotFound,
 }
 
 /// All name records that matched a candidate under the selected matching rule.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct MatchEvidence {
+    /// Same path as the corresponding candidate.
     pub path: PathBuf,
+    /// Same collection index as the corresponding candidate.
     pub face_index: u32,
+    /// Matching name records that support the selected method, in sorted order.
     pub matched_names: Vec<FontName>,
-    /// The selected face needs renderer-side emboldening. No font is generated.
+    /// True only when bold synthesis was permitted and the 400→700 rule applies.
+    /// False does not guarantee visual fidelity or that a renderer will not synthesize.
+    /// No font is generated and actual rendering is not checked.
     pub synthetic_bold: bool,
+    /// How this candidate was selected, independently of the synthesis flag.
     pub selection_method: SelectionMethod,
 }
 
+/// Selection path used for a candidate; serialized using snake_case names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SelectionMethod {
+    /// Exact normalized PostScript alias, ahead of family and full-name matches.
     PostScriptName,
+    /// Full name sufficiently distinct from generic family aliases.
     FullName,
+    /// Legacy family alias belonging to a broader typographic family and one style.
     LegacyFamilyName,
+    /// Family candidate with exact requested weight and italic state.
     FamilyExact,
+    /// Family candidate at minimum weight distance, with matching italic state.
     FamilyNearest,
+    /// Exact-weight selection failed; the permitted 400→700 fallback selected this face.
     FamilySynthesis,
+    /// An alias without a more specific selection classification.
     InternalName,
 }
 
+/// Weight selection policy for generic families, not specific face names.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum WeightMatching {
     #[default]
+    /// Require numeric equality. Separate synthesis permission can still allow fallback.
     Exact,
     /// Minimum absolute weight difference among same-family, same-italic faces.
     /// All equally close faces are retained; there is no distance cutoff.
+    /// Exact matches are preferred and reported as [`SelectionMethod::FamilyExact`].
+    /// This absolute-distance policy does not emulate CSS or a specific renderer.
     Nearest,
 }
 
+/// Permitted renderer-side synthesis, disabled by default.
+///
+/// Permission records a dependency on synthesis; this library does not alter glyphs.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct SynthesisPolicy {
+    /// Permit weight 400 to satisfy weight 700 when italic state agrees.
+    /// No other weight conversions or italic synthesis are implemented.
     pub bold: bool,
 }
 
+/// Independent controls for family weight selection and style synthesis.
+///
+/// Defaults are [`WeightMatching::Exact`] and no synthesis. The options do not
+/// change alias normalization or specific-name selection.
+///
+/// ```
+/// use ass_fonts::{ResolveOptions, SynthesisPolicy, WeightMatching};
+/// let options = ResolveOptions {
+///     weight_matching: WeightMatching::Nearest,
+///     synthesis: SynthesisPolicy { bold: true },
+/// };
+/// assert_eq!(options.weight_matching, WeightMatching::Nearest);
+/// assert!(!ResolveOptions::default().synthesis.bold);
+/// ```
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct ResolveOptions {
+    /// Exact or minimum-distance selection within a matching family.
     pub weight_matching: WeightMatching,
+    /// Synthesis permission evaluated independently of weight selection.
     pub synthesis: SynthesisPolicy,
 }
 
@@ -230,10 +316,15 @@ impl From<ResolveMode> for ResolveOptions {
     }
 }
 
+/// Compatibility presets for [`FontIndex::resolve_with_mode`].
+///
+/// Both presets use exact weight matching. Use [`ResolveOptions`] to enable nearest
+/// weight selection; converting a preset with `ResolveOptions::from` preserves this.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResolveMode {
     #[default]
+    /// Exact family matching with synthesis disabled.
     Strict,
     /// Allow renderer-side style synthesis. Currently only bold is supported:
     /// weight 400 faces for weight 700 requests, keeping italic unchanged.
@@ -242,9 +333,16 @@ pub enum ResolveMode {
     AllowStyleSynthesis,
 }
 
+/// One input reference and its selection result.
+///
+/// Produced entries in [`ResolveReport`] have zero, one, or multiple candidates
+/// according to their bucket. Optional missing information is omitted from JSON
+/// when absent; empty `candidates` and `matches` arrays are retained.
 #[derive(Debug, Clone, Serialize)]
 pub struct Resolution {
+    /// Original request, including its source lines and requested attributes.
     pub reference: FontReference,
+    /// Selected native faces, sorted by path and face index.
     pub candidates: Vec<FontFace>,
     /// Present only for missing entries.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -257,10 +355,18 @@ pub struct Resolution {
     pub matches: Vec<MatchEvidence>,
 }
 
+/// Requests partitioned by candidate count, preserving input order in each bucket.
+///
+/// Matching does not deduplicate input references. A resolved entry identifies a
+/// dependency, not glyph coverage or exact rendering. Inspect scan and subtitle
+/// diagnostics separately; they are not embedded in this report.
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct ResolveReport {
+    /// Exactly one candidate per entry.
     pub resolved: Vec<Resolution>,
+    /// No candidates; each entry contains a [`MissingReason`].
     pub missing: Vec<Resolution>,
+    /// Two or more candidates, including equally close weights and duplicate files.
     pub ambiguous: Vec<Resolution>,
 }
 
@@ -276,6 +382,15 @@ pub struct FontIndex {
 }
 
 impl FontIndex {
+    /// Build an in-memory index from owned face metadata; performs no filesystem I/O.
+    ///
+    /// Merges aliases for identical `(path, face_index)` pairs. If duplicate inputs
+    /// disagree on weight or italic state, the first input's attributes are retained.
+    /// Caller paths are not canonicalized; use [`ScanReport::scan`] for canonical paths.
+    /// Typed records populate the alias lists, and untyped aliases receive
+    /// [`NameKind::InternalName`] evidence. Candidates are ordered by path and index.
+    ///
+    /// The index can be reused for many subtitles and different resolution options.
     pub fn new(faces: impl IntoIterator<Item = FontFace>) -> Self {
         let mut merged: BTreeMap<(PathBuf, u32), FontFace> = BTreeMap::new();
         for face in faces {
@@ -381,6 +496,9 @@ impl FontIndex {
 
     /// Resolve with exact family weight matching and no style synthesis.
     /// Specific names select faces independently of their native weight.
+    ///
+    /// Equivalent to [`Self::resolve_with_options`] with [`ResolveOptions::default`].
+    /// References are processed in input order; no additional files are scanned.
     pub fn resolve(&self, references: &[FontReference]) -> ResolveReport {
         self.resolve_with_mode(references, ResolveMode::Strict)
     }
@@ -402,6 +520,30 @@ impl FontIndex {
     /// With insufficient metadata, family interpretation is retained.
     /// Nearest weight selection, when enabled, precedes synthesis. It does not
     /// itself enable synthesis or change the matching of specific names.
+    ///
+    /// # Selection order
+    ///
+    /// 1. A matching PostScript name locates a specific face.
+    /// 2. A full name locates a face unless it also denotes a generic family.
+    /// 3. A legacy family alias can locate a variant when a broader typographic
+    ///    family exists and all matching faces agree on weight and italic state.
+    /// 4. Generic families use exact attributes, then optional nearest weight,
+    ///    then optional synthetic-bold fallback. Italic state must always agree.
+    /// 5. Remaining untyped aliases locate their associated faces directly.
+    ///
+    /// Missing or conflicting name-table metadata keeps the conservative family
+    /// interpretation. Specific-name matches retain native attributes even when
+    /// these differ from the request; they do not certify the requested visual style.
+    ///
+    /// # Reporting
+    ///
+    /// All equally ranked candidates are kept, never resolved by path order.
+    /// Nearest selection and synthesis are reported independently: selecting 693
+    /// for 700 is `family_nearest` without synthetic bold; selecting 400 for 700
+    /// sets the synthesis flag only when permission is enabled. Names that cannot
+    /// be found and families lacking an eligible style have distinct missing reasons.
+    ///
+    /// This method performs no I/O, font modification, or renderer invocation.
     pub fn resolve_with_options(
         &self,
         references: &[FontReference],

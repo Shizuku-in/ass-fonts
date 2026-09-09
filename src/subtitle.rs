@@ -2,11 +2,17 @@ use crate::normalize_name;
 use serde::Serialize;
 use std::{collections::BTreeMap, fs, io, path::Path};
 
+/// A font request applied to non-whitespace dialogue text.
+///
+/// Extraction groups requests by normalized name, weight, and italic state.
+/// The same font name can therefore appear in several references.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FontReference {
+    /// First encountered spelling, trimmed but retaining a possible `@` prefix.
     pub name: String,
     /// Requested weight: 400 for normal, 700 for bold, or an explicit ASS weight.
     pub weight: u16,
+    /// Whether the subtitle requests italic text; not the selected face's property.
     pub italic: bool,
     /// One-based source line numbers, sorted and unique.
     pub lines: Vec<usize>,
@@ -35,20 +41,38 @@ fn italic(value: &str) -> Option<bool> {
     }
 }
 
+/// A recoverable subtitle parsing issue, including any fallback taken.
 #[derive(Debug, Clone, Serialize)]
 pub struct Diagnostic {
+    /// One-based source line number.
     pub line: usize,
+    /// Human-readable explanation; wording is not a stable machine-readable code.
     pub message: String,
 }
 
+/// Extracted requests and recoverable parsing diagnostics.
+///
+/// Empty diagnostics do not validate the entire ASS format or prove visibility:
+/// timing, clipping, and transparency are not evaluated.
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct SubtitleFonts {
+    /// Sorted by normalized name, then weight, then italic state.
     pub references: Vec<FontReference>,
+    /// Issues sorted by source line; partial references may still be useful.
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Read UTF-8 (optional BOM) or BOM-marked UTF-16 LE/BE.
-/// Legacy encodings must be decoded by the caller and passed to `extract_fonts`.
+/// Read and parse a UTF-8 or BOM-marked UTF-16 LE/BE subtitle file.
+///
+/// UTF-8 accepts an optional BOM. Legacy encodings must be decoded by the caller
+/// and passed to [`extract_fonts`]; this function does not guess the encoding.
+/// The entire file is loaded into memory. The filename extension is not checked.
+///
+/// # Errors
+///
+/// Returns filesystem errors unchanged, or [`io::ErrorKind::InvalidData`] for
+/// invalid UTF-8/UTF-16, including an odd UTF-16 byte count. Recoverable subtitle
+/// syntax problems are returned in [`SubtitleFonts::diagnostics`], not as I/O errors.
 pub fn read_subtitle(path: impl AsRef<Path>) -> io::Result<SubtitleFonts> {
     let bytes = fs::read(path)?;
     let invalid = |e: String| io::Error::new(io::ErrorKind::InvalidData, e);
@@ -94,8 +118,36 @@ fn diagnostic(out: &mut SubtitleFonts, line: usize, message: impl Into<String>) 
     });
 }
 
-/// Parse ASS v4+ or SSA v4. Only fonts applied to non-whitespace dialogue text
-/// are collected. Invalid records are diagnosed and skipped.
+/// Extract requests from decoded ASS v4+ or SSA v4 text.
+///
+/// Uses `Format` column order (standard fields when absent); event `Text` must be
+/// last and may contain commas. Styles may be defined after their dialogues.
+/// Tracks style fonts, `\fn`, `\b`, `\i`, `\r`, named resets, and `\p` drawing mode.
+/// Unused styles, comment events, override-block contents, drawing data, and
+/// whitespace-only runs do not contribute references. Tags inside parenthesized
+/// arguments are not applied as top-level overrides.
+///
+/// # Recovery
+///
+/// Malformed records are skipped with diagnostics. Unknown dialogue styles try
+/// `Default`; unknown named resets try the original dialogue style. Duplicate
+/// style definitions use the last definition. An unclosed override block is
+/// diagnosed and treated as literal text. Unrecognized sections are ignored:
+/// an unrelated input string may simply produce an empty result.
+///
+/// ```
+/// let fonts = ass_fonts::extract_fonts(r"[V4+ Styles]
+/// Format: Name, Fontname
+/// Style: Default, Example
+/// [Events]
+/// Format: Style, Text
+/// Dialogue: Default,Normal{\b1}Bold");
+/// assert!(fonts.diagnostics.is_empty());
+/// assert_eq!(fonts.references.len(), 2);
+/// assert_eq!(fonts.references[0].weight, 400);
+/// assert_eq!(fonts.references[1].weight, 700);
+/// assert_eq!(fonts.references[1].lines, vec![6]);
+/// ```
 pub fn extract_fonts(text: &str) -> SubtitleFonts {
     let mut out = SubtitleFonts::default();
     let mut styles = BTreeMap::<String, Style>::new();
