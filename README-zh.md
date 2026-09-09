@@ -37,9 +37,12 @@ cargo run --example report -- movie.ass ./fonts
 收集字体时，可允许由渲染器合成样式（目前仅支持粗体）：
 
 ```rust
-let report = index.resolve_with_mode(
+let report = index.resolve_with_options(
     &subtitle.references,
-    ass_fonts::ResolveMode::AllowStyleSynthesis,
+    ass_fonts::ResolveOptions {
+        synthesis: ass_fonts::SynthesisPolicy { bold: true },
+        ..Default::default()
+    },
 );
 ```
 
@@ -47,7 +50,7 @@ let report = index.resolve_with_mode(
 cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 ```
 
-默认 `resolve` 仍为严格模式。可选模式优先选择精确匹配的家族变体，再允许斜体状态相同的 400 字重字体满足 700 字重请求。多个合适候选仍返回歧义。`matches[].synthetic_bold: true` 标记需要加粗的候选，包括适用此规则的具体名称匹配。本库不生成字体文件，也未验证实际渲染效果。
+`ResolveOptions` 将字重选择（目前仅有 `WeightMatching::Exact`）与合成能力（`bold`，默认关闭）分开。`resolve` 使用默认选项，`resolve_with_mode` 保留为兼容入口。合成策略优先选择精确匹配的家族变体，再允许斜体状态相同的 400 字重字体满足 700 字重请求。多个合适候选仍返回歧义。`matches[].synthetic_bold: true` 标记需要加粗的候选。本库不生成字体文件，也未验证实际渲染效果。
 
 每个条目包含 `candidates` 和 `matches`（每个候选对应一条匹配依据）。缺失条目的候选及匹配依据为空，并附带：
 
@@ -57,6 +60,8 @@ cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 | `style_not_found` | 家族存在，但没有所需字重/斜体 | 扫描到的该家族全部 face |
 
 `matches[].matched_names` 保留命中的原始内部名称及 `kind`：`family`、`full_name` 或 `post_script_name`。调用方提供的名称若没有类型信息，标为 `internal_name`。已有变体仅供参考，不作为回退选择。成功和歧义条目省略 `missing_reason`。
+
+扫描名称保留原始 `name_id`。每个匹配记录包含 `selection_method`：`post_script_name`、`full_name`、`legacy_family_name`、`family_exact`、`family_synthesis` 或 `internal_name`。
 
 例如，JSON 报告中的名称缺失条目：
 
@@ -73,7 +78,9 @@ cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 
 按字体内部的家族名、全名、PostScript 名及相关名称匹配，统一执行 Unicode NFKC、转小写、空白规范化，并去除 ASS 竖排字体的 `@` 前缀。匹配不使用文件名。
 
-引用按名称、字重和斜体状态分组。普通体/粗体对应 400/700，保留 `\b100`–`\b900` 指定的字重。家族名要求字重和斜体属性精确匹配（oblique 也视为斜体）；没有对应变体时返回 `missing`，多个匹配 face 仍返回 `ambiguous`。全名/PostScript 名用于定位具体字体，不按请求的样式筛选；名称同时也是家族别名时，优先按家族处理。
+引用按名称、字重和斜体状态分组。普通体/粗体对应 400/700，保留 `\b100`–`\b900` 指定的字重。PostScript 名优先；完整名称用于定位具体 face，但与通用家族名重合时仍按家族处理。传统家族别名具有更广的排印家族记录、且命中的 face 字重/斜体属性一致时，也可定位具体变体。判断依据是名称表关系，不解析 Bold、W17 等后缀。
+
+通用家族要求字重和斜体精确匹配（oblique 也视为斜体）；元数据不足时保守地按家族处理。具体名称保留字体的原生设计，不因请求为 400 而拒绝匹配；这表示字体依赖已定位，不保证请求的视觉样式已满足。报告保留请求与实际属性，同名多个文件仍返回歧义。字重择近和斜体合成尚未实现。
 
 `read_subtitle` 支持 UTF-8 和带 BOM 的 UTF-16 LE/BE。传统编码字幕请先解码，再传入 `extract_fonts`。
 

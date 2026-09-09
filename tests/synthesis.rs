@@ -11,6 +11,7 @@ fn face(path: &str, weight: u16, italic: bool) -> FontFace {
         name_records: vec![FontName {
             name: "Example-Regular".into(),
             kind: NameKind::PostScriptName,
+            name_id: None,
         }],
         weight,
         italic,

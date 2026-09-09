@@ -334,18 +334,22 @@ fn match_evidence_merges_aliases_and_preserves_family_precedence() {
             FontName {
                 name: "Example".into(),
                 kind: NameKind::Family,
+                name_id: None,
             },
             FontName {
                 name: "Example".into(),
                 kind: NameKind::FullName,
+                name_id: None,
             },
             FontName {
                 name: "Alias".into(),
                 kind: NameKind::FullName,
+                name_id: None,
             },
             FontName {
                 name: "Alias".into(),
                 kind: NameKind::PostScriptName,
+                name_id: None,
             },
         ],
         weight: 400,
@@ -369,7 +373,7 @@ fn match_evidence_merges_aliases_and_preserves_family_precedence() {
             .collect();
         match resolution.reference.name.as_str() {
             "Example" => assert_eq!(kinds, [NameKind::Family]),
-            "Alias" => assert_eq!(kinds, [NameKind::FullName, NameKind::PostScriptName]),
+            "Alias" => assert_eq!(kinds, [NameKind::PostScriptName]),
             "Untyped" => assert_eq!(kinds, [NameKind::InternalName]),
             _ => unreachable!(),
         }

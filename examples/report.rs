@@ -1,4 +1,4 @@
-use ass_fonts::{FontIndex, ResolveMode, ScanReport, read_subtitle};
+use ass_fonts::{FontIndex, ResolveMode, ResolveOptions, ScanReport, read_subtitle};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1).peekable();
@@ -20,11 +20,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let extracted = read_subtitle(subtitle)?;
     let scanned = ScanReport::scan(roots);
-    let report = FontIndex::new(scanned.faces).resolve_with_mode(&extracted.references, mode);
+    let options = ResolveOptions::from(mode);
+    let report = FontIndex::new(scanned.faces).resolve_with_options(&extracted.references, options);
     println!(
         "{}",
         serde_json::to_string_pretty(&serde_json::json!({
             "mode": mode,
+            "options": options,
             "resolved": report.resolved,
             "missing": report.missing,
             "ambiguous": report.ambiguous,

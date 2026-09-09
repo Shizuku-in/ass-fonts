@@ -37,9 +37,12 @@ cargo run --example report -- movie.ass ./fonts
 To allow renderer-side style synthesis when collecting fonts (currently bold only):
 
 ```rust
-let report = index.resolve_with_mode(
+let report = index.resolve_with_options(
     &subtitle.references,
-    ass_fonts::ResolveMode::AllowStyleSynthesis,
+    ass_fonts::ResolveOptions {
+        synthesis: ass_fonts::SynthesisPolicy { bold: true },
+        ..Default::default()
+    },
 );
 ```
 
@@ -47,7 +50,7 @@ let report = index.resolve_with_mode(
 cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
 ```
 
-The default `resolve` remains strict. The optional mode first prefers exact family matches, then permits a weight 400 face for a weight 700 request with the same italic state. Multiple eligible faces remain ambiguous. `matches[].synthetic_bold: true` marks each candidate requiring emboldening, including explicit-name matches where this rule applies. No font file is generated; rendering and visual quality are not verified.
+`ResolveOptions` separates weight selection (`WeightMatching::Exact`, currently the only policy) from synthesis (`bold`, off by default). `resolve` uses these defaults; `resolve_with_mode` remains a compatibility wrapper. Synthesis first prefers exact family matches, then permits a weight 400 face for a weight 700 request with the same italic state. Multiple eligible faces remain ambiguous. `matches[].synthetic_bold: true` marks candidates requiring emboldening. No font file is generated; rendering and visual quality are not verified.
 
 Each entry includes `candidates` and `matches` (one provenance record per candidate). Missing entries have empty candidates and matches, plus:
 
@@ -57,6 +60,8 @@ Each entry includes `candidates` and `matches` (one provenance record per candid
 | `style_not_found` | Family found, requested weight/italic unavailable | All scanned faces matching that family |
 
 `matches[].matched_names` contains the original internal names and their `kind`: `family`, `full_name`, or `post_script_name`. Caller-supplied names without type metadata use `internal_name`. Available variants are informational, not fallback selections. `missing_reason` is omitted for successful and ambiguous entries.
+
+Scanned names retain their original `name_id`. Each match has a `selection_method`: `post_script_name`, `full_name`, `legacy_family_name`, `family_exact`, `family_synthesis`, or `internal_name`.
 
 For example, a missing-name entry in the JSON report is:
 
@@ -73,7 +78,9 @@ For example, a missing-name entry in the JSON report is:
 
 Matching uses internal family, full, PostScript, and related names, normalized with Unicode NFKC, lowercase conversion, whitespace normalization, and removal of the ASS vertical-font `@` prefix. Filenames are not used.
 
-References are grouped by name, weight, and italic state. Normal/bold map to 400/700; explicit `\b100`–`\b900` weights are retained. Family-name matches require exact weight and italic attributes (oblique counts as italic). No matching variant means `missing`; duplicate matching faces remain `ambiguous`. Full/PostScript names identify specific faces regardless of requested styling. If a name is also a family alias, family matching takes precedence.
+References are grouped by name, weight, and italic state. Normal/bold map to 400/700; explicit `\b100`–`\b900` weights are retained. PostScript names take priority. Full names identify specific faces unless they also denote a generic family. Legacy family aliases can identify variants when a broader typographic family is recorded and all matching faces share the same weight/italic attributes. This uses name-table relationships, not suffixes such as Bold or W17.
+
+Generic families require exact weight and italic attributes (oblique counts as italic). Insufficient metadata keeps the conservative family interpretation. Specific names preserve the face's native design even when the request says 400; this resolves a font dependency, not the accuracy of the requested visual style. Requested and native attributes remain in the report. Duplicate matching files remain ambiguous. Nearest-weight selection and italic synthesis are not yet implemented.
 
 `read_subtitle` accepts UTF-8 and BOM-marked UTF-16 LE/BE. For legacy encodings, decode the text first and pass it to `extract_fonts`.
 

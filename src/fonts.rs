@@ -35,6 +35,9 @@ pub enum NameKind {
 pub struct FontName {
     pub name: String,
     pub kind: NameKind,
+    /// Original OpenType name ID; absent for caller-supplied aliases.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name_id: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,6 +140,7 @@ impl ScanReport {
                     }
                     name_records.insert(FontName {
                         name: decoded.clone(),
+                        name_id: Some(name.name_id),
                         kind: match name.name_id {
                             1 | 16 | 21 => NameKind::Family,
                             4 | 18 => NameKind::FullName,
@@ -178,6 +182,48 @@ pub struct MatchEvidence {
     pub matched_names: Vec<FontName>,
     /// The selected face needs renderer-side emboldening. No font is generated.
     pub synthetic_bold: bool,
+    pub selection_method: SelectionMethod,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectionMethod {
+    PostScriptName,
+    FullName,
+    LegacyFamilyName,
+    FamilyExact,
+    FamilySynthesis,
+    InternalName,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum WeightMatching {
+    #[default]
+    Exact,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct SynthesisPolicy {
+    pub bold: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct ResolveOptions {
+    pub weight_matching: WeightMatching,
+    pub synthesis: SynthesisPolicy,
+}
+
+impl From<ResolveMode> for ResolveOptions {
+    fn from(mode: ResolveMode) -> Self {
+        Self {
+            synthesis: SynthesisPolicy {
+                bold: mode == ResolveMode::AllowStyleSynthesis,
+            },
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -220,6 +266,9 @@ pub struct FontIndex {
     faces: Vec<FontFace>,
     names: BTreeMap<String, BTreeSet<usize>>,
     families: BTreeMap<String, BTreeSet<usize>>,
+    full_names: BTreeMap<String, BTreeSet<usize>>,
+    postscript_names: BTreeMap<String, BTreeSet<usize>>,
+    generic_families: BTreeSet<String>,
 }
 
 impl FontIndex {
@@ -243,10 +292,17 @@ impl FontIndex {
                     }
                 }
                 for name in &face.family_names {
-                    face.name_records.push(FontName {
-                        name: name.clone(),
-                        kind: NameKind::Family,
-                    });
+                    if !face
+                        .name_records
+                        .iter()
+                        .any(|r| r.name == *name && r.kind == NameKind::Family)
+                    {
+                        face.name_records.push(FontName {
+                            name: name.clone(),
+                            kind: NameKind::Family,
+                            name_id: None,
+                        });
+                    }
                 }
                 face.names.extend(face.family_names.iter().cloned());
                 face.names.sort();
@@ -258,6 +314,7 @@ impl FontIndex {
                         face.name_records.push(FontName {
                             name: name.clone(),
                             kind: NameKind::InternalName,
+                            name_id: None,
                         });
                     }
                 }
@@ -268,7 +325,33 @@ impl FontIndex {
             .collect();
         let mut names: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
         let mut families: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+        let mut full_names: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+        let mut postscript_names: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+        let mut generic_families = BTreeSet::new();
         for (id, face) in faces.iter().enumerate() {
+            let has_typographic = face.name_records.iter().any(|r| r.name_id == Some(16));
+            for record in &face.name_records {
+                let key = normalize_name(&record.name);
+                if key.is_empty() {
+                    continue;
+                }
+                match record.kind {
+                    NameKind::FullName => {
+                        full_names.entry(key).or_default().insert(id);
+                    }
+                    NameKind::PostScriptName => {
+                        postscript_names.entry(key).or_default().insert(id);
+                    }
+                    NameKind::Family
+                        if record.name_id == Some(16)
+                            || record.name_id == Some(21)
+                            || !has_typographic =>
+                    {
+                        generic_families.insert(key);
+                    }
+                    _ => {}
+                }
+            }
             for name in &face.family_names {
                 let key = normalize_name(name);
                 if !key.is_empty() {
@@ -286,13 +369,14 @@ impl FontIndex {
             faces,
             names,
             families,
+            full_names,
+            postscript_names,
+            generic_families,
         }
     }
 
-    /// Family aliases require exact weight and italic matches. Other aliases
-    /// identify concrete faces regardless of requested styling. If an alias is
-    /// both a family and a full name, the family interpretation takes precedence.
-    /// No nearest-weight fallback, synthesis, or variable-font instancing occurs.
+    /// Resolve with exact family weight matching and no style synthesis.
+    /// Specific names select faces independently of their native weight.
     pub fn resolve(&self, references: &[FontReference]) -> ResolveReport {
         self.resolve_with_mode(references, ResolveMode::Strict)
     }
@@ -306,22 +390,60 @@ impl FontIndex {
         references: &[FontReference],
         mode: ResolveMode,
     ) -> ResolveReport {
+        self.resolve_with_options(references, mode.into())
+    }
+
+    /// PostScript names have priority. Full names override legacy family aliases
+    /// only when name-table relationships distinguish them from generic families.
+    /// With insufficient metadata, family interpretation is retained.
+    pub fn resolve_with_options(
+        &self,
+        references: &[FontReference],
+        options: ResolveOptions,
+    ) -> ResolveReport {
         let mut report = ResolveReport::default();
         for reference in references {
             let key = normalize_name(&reference.name);
             let family = self.families.get(&key);
-            let mut candidates = family
-                .or_else(|| self.names.get(&key))
+            let full = self.full_names.get(&key).filter(|ids| {
+                family.is_none()
+                    || (!self.generic_families.contains(&key)
+                        && family.is_some_and(|family| family.is_subset(ids)))
+            });
+            let (selected, mut method) = if let Some(ids) = self.postscript_names.get(&key) {
+                (Some(ids), SelectionMethod::PostScriptName)
+            } else if let Some(ids) = full {
+                (Some(ids), SelectionMethod::FullName)
+            } else if let Some(ids) = family.filter(|ids| {
+                !self.generic_families.contains(&key)
+                    && ids
+                        .iter()
+                        .map(|&i| (self.faces[i].weight, self.faces[i].italic))
+                        .collect::<BTreeSet<_>>()
+                        .len()
+                        == 1
+            }) {
+                // A legacy subfamily of a broader typographic family can have
+                // a full-name spelling different from its family alias. Only
+                // treat it as specific when its faces agree on style.
+                (Some(ids), SelectionMethod::LegacyFamilyName)
+            } else if let Some(ids) = family {
+                (Some(ids), SelectionMethod::FamilyExact)
+            } else {
+                (self.names.get(&key), SelectionMethod::InternalName)
+            };
+            let family_match = method == SelectionMethod::FamilyExact;
+            let mut candidates = selected
                 .into_iter()
                 .flatten()
                 .filter(|&&i| {
-                    family.is_none()
+                    !family_match
                         || (self.faces[i].weight == reference.weight
                             && self.faces[i].italic == reference.italic)
                 })
                 .map(|&i| self.faces[i].clone())
                 .collect::<Vec<_>>();
-            if candidates.is_empty() && mode == ResolveMode::AllowStyleSynthesis {
+            if candidates.is_empty() && family_match && options.synthesis.bold {
                 candidates = family
                     .into_iter()
                     .flatten()
@@ -329,6 +451,9 @@ impl FontIndex {
                     .filter(|face| needs_synthetic_bold(reference, face))
                     .cloned()
                     .collect();
+                if !candidates.is_empty() {
+                    method = SelectionMethod::FamilySynthesis;
+                }
             }
             let count = candidates.len();
             let missing_reason = (count == 0).then_some(if family.is_some() {
@@ -350,14 +475,27 @@ impl FontIndex {
                 .map(|face| MatchEvidence {
                     path: face.path.clone(),
                     face_index: face.face_index,
-                    synthetic_bold: mode == ResolveMode::AllowStyleSynthesis
-                        && needs_synthetic_bold(reference, face),
+                    selection_method: method,
+                    synthetic_bold: options.synthesis.bold && needs_synthetic_bold(reference, face),
                     matched_names: face
                         .name_records
                         .iter()
                         .filter(|r| {
                             normalize_name(&r.name) == key
-                                && (family.is_none() || r.kind == NameKind::Family)
+                                && match method {
+                                    SelectionMethod::PostScriptName => {
+                                        r.kind == NameKind::PostScriptName
+                                    }
+                                    SelectionMethod::FullName => r.kind == NameKind::FullName,
+                                    SelectionMethod::LegacyFamilyName => {
+                                        r.kind == NameKind::Family && r.name_id == Some(1)
+                                    }
+                                    SelectionMethod::FamilyExact
+                                    | SelectionMethod::FamilySynthesis => {
+                                        r.kind == NameKind::Family
+                                    }
+                                    SelectionMethod::InternalName => true,
+                                }
                         })
                         .cloned()
                         .collect(),
