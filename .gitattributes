@@ -1,0 +1,6 @@
+* text=auto eol=lf
+
+*.[tT][tT][fF] binary
+*.[oO][tT][fF] binary
+*.[tT][tT][cC] binary
+*.[oO][tT][cC] binary

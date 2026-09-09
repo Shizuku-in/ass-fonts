@@ -57,6 +57,9 @@ fn normalization_aliases_deduplication_and_ambiguity() {
         path: path.into(),
         face_index: index,
         names: names.iter().map(|s| s.to_string()).collect(),
+        family_names: vec![names[0].into()],
+        weight: 400,
+        italic: false,
     };
     let first = face("a.ttc", 0, &["Example", "Example-Regular", "中文"]);
     let index = FontIndex::new([first.clone(), first, face("a.ttc", 1, &["Example"])]);
@@ -64,6 +67,8 @@ fn normalization_aliases_deduplication_and_ambiguity() {
         .into_iter()
         .map(|name| FontReference {
             name: name.into(),
+            weight: 400,
+            italic: false,
             lines: vec![1],
         })
         .collect();
@@ -88,6 +93,10 @@ fn put32(bytes: &mut [u8], offset: usize, n: u32) {
 }
 
 fn sfnt(name: &str, base: usize, otf: bool) -> Vec<u8> {
+    styled_sfnt(name, base, otf, 400, false)
+}
+
+fn styled_sfnt(name: &str, base: usize, otf: bool, weight: u16, italic: bool) -> Vec<u8> {
     let utf16: Vec<u8> = name.encode_utf16().flat_map(u16::to_be_bytes).collect();
     let mut naming = vec![0; 18];
     put16(&mut naming, 2, 1);
@@ -105,7 +114,12 @@ fn sfnt(name: &str, base: usize, otf: bool) -> Vec<u8> {
     let mut maxp = vec![0; 6];
     put32(&mut maxp, 0, 0x5000);
     put16(&mut maxp, 4, 1);
+    let mut os2 = vec![0; 78];
+    put16(&mut os2, 4, weight);
+    put16(&mut os2, 6, 5);
+    put16(&mut os2, 62, u16::from(italic));
     let tables = [
+        (*b"OS/2", os2),
         (*b"head", head),
         (*b"hhea", hhea),
         (*b"maxp", maxp),
@@ -134,6 +148,130 @@ fn sfnt(name: &str, base: usize, otf: bool) -> Vec<u8> {
         bytes.extend(data);
     }
     bytes
+}
+
+#[test]
+fn styles_and_overrides_track_distinct_runs() {
+    for section in ["V4 Styles", "V4+ Styles"] {
+        let text = format!(
+            "[{section}]\nFormat: Italic,Fontname,Bold,Name\nStyle: 0,Family,0,Default\nStyle: -1,Family,-1,Alt\n[Events]\nFormat: Style,Text\nDialogue: Default,a{{\\b1}}b{{\\i1}}c{{\\b0}}d{{\\rAlt}}e{{\\b500\\i0}}f{{\\r}}g\nDialogue: Alt,h"
+        );
+        let parsed = extract_fonts(&text);
+        assert!(parsed.diagnostics.is_empty());
+        let attributes: Vec<_> = parsed
+            .references
+            .iter()
+            .map(|r| (r.weight, r.italic))
+            .collect();
+        assert_eq!(
+            attributes,
+            [
+                (400, false),
+                (400, true),
+                (500, false),
+                (700, false),
+                (700, true)
+            ]
+        );
+        assert_eq!(parsed.references[4].lines, [7, 8]);
+        assert_eq!(parsed.references[0].lines, [7]);
+    }
+}
+
+#[test]
+fn reset_defaults_and_font_changes_preserve_correct_attributes() {
+    let text = "[V4+ Styles]\nFormat: Name,Fontname,Bold,Italic\nStyle: Default,Base,0,0\nStyle: Alt,Other,-1,-1\n[Events]\nFormat: Style,Text\nDialogue: Default,{\\rAlt\\b0\\i0\\b\\i\\fnChanged}x{\\fn}y{\\rUnknown}z";
+    let parsed = extract_fonts(text);
+    let runs: Vec<_> = parsed
+        .references
+        .iter()
+        .map(|r| (r.name.as_str(), r.weight, r.italic))
+        .collect();
+    assert_eq!(
+        runs,
+        [
+            ("Base", 400, false),
+            ("Changed", 700, true),
+            ("Other", 700, true)
+        ]
+    );
+    assert_eq!(parsed.diagnostics.len(), 1);
+}
+
+#[test]
+fn ignored_tags_drawings_and_overwritten_attributes_do_not_create_references() {
+    let parsed = extract_fonts(&script(
+        r"{\b1\b0\i1\i0\bord3\blur2\be1\iclip(0,0,1,1)\t(\b1\i1)}x{\p1\b1\i1}m 0 0{\r}y{\b1}",
+    ));
+    assert!(parsed.diagnostics.is_empty());
+    assert_eq!(parsed.references.len(), 1);
+    assert_eq!(
+        (parsed.references[0].weight, parsed.references[0].italic),
+        (400, false)
+    );
+    let invalid = extract_fonts(&script(r"{\b9999\i2}x"));
+    assert_eq!(invalid.diagnostics.len(), 2);
+    assert_eq!(invalid.references[0].weight, 400);
+}
+
+#[test]
+fn family_variants_resolve_from_scanned_attributes() {
+    let dir = tempfile::tempdir().unwrap();
+    for (file, weight, italic) in [
+        ("regular.ttf", 400, false),
+        ("bold.otf", 700, false),
+        ("italic.ttf", 400, true),
+        ("bolditalic.otf", 700, true),
+        ("medium.ttf", 500, false),
+    ] {
+        std::fs::write(
+            dir.path().join(file),
+            styled_sfnt("Family", 0, file.ends_with("otf"), weight, italic),
+        )
+        .unwrap();
+    }
+    let scan = ScanReport::scan([dir.path()]);
+    assert!(scan.issues.is_empty());
+    assert_eq!(scan.faces.len(), 5);
+    let parsed = extract_fonts(&script(
+        r"{\fnFamily}a{\b1}b{\i1}c{\b0}d{\i0\b500}e{\b600}f",
+    ));
+    let report = FontIndex::new(scan.faces).resolve(&parsed.references);
+    assert_eq!(report.resolved.len(), 5);
+    assert_eq!(report.missing.len(), 1);
+    assert_eq!(report.missing[0].reference.weight, 600);
+    assert!(report.ambiguous.is_empty());
+    for resolution in report.resolved {
+        assert_eq!(resolution.candidates[0].weight, resolution.reference.weight);
+        assert_eq!(resolution.candidates[0].italic, resolution.reference.italic);
+    }
+}
+
+#[test]
+fn duplicate_variants_remain_ambiguous_but_explicit_names_identify_faces() {
+    let make = |path: &str, face_index, weight, italic, full: &str| FontFace {
+        path: path.into(),
+        face_index,
+        names: vec!["Family".into(), full.into()],
+        family_names: vec!["Family".into()],
+        weight,
+        italic,
+    };
+    let regular = make("a.ttc", 0, 400, false, "Family-Regular");
+    let index = FontIndex::new([
+        regular.clone(),
+        regular,
+        make("a.ttc", 1, 700, true, "Family-BoldItalic"),
+        make("b.otf", 0, 700, true, "Other-BoldItalic"),
+    ]);
+    let refs = extract_fonts(&script(
+        r"{\fnFamily}a{\b1\i1}b{\fnFamily-Regular}c{\fnFamily-BoldItalic\b0\i0}d",
+    ));
+    let report = index.resolve(&refs.references);
+    assert_eq!(report.resolved.len(), 3);
+    assert_eq!(report.ambiguous.len(), 1);
+    assert_eq!(report.ambiguous[0].candidates.len(), 2);
+    assert!(report.missing.is_empty());
 }
 
 fn collection(otf: bool) -> Vec<u8> {

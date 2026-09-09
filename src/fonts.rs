@@ -12,6 +12,11 @@ pub struct FontFace {
     pub path: PathBuf,
     pub face_index: u32,
     pub names: Vec<String>,
+    /// Family aliases (name IDs 1/16/21), used for weight/italic filtering.
+    pub family_names: Vec<String>,
+    pub weight: u16,
+    /// Includes fonts marked as oblique.
+    pub italic: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -94,6 +99,7 @@ impl ScanReport {
                 }
             };
             let mut names = BTreeSet::new();
+            let mut family_names = BTreeSet::new();
             for name in face.names() {
                 // Family, full, PostScript, typographic family, compatible full, WWS family.
                 if ![1, 4, 6, 16, 18, 21].contains(&name.name_id) {
@@ -106,8 +112,11 @@ impl ScanReport {
                         && name.name.is_ascii())
                     .then(|| String::from_utf8_lossy(name.name).into_owned())
                 });
-                if let Some(name) = decoded.filter(|n| !normalize_name(n).is_empty()) {
-                    names.insert(name);
+                if let Some(decoded) = decoded.filter(|n| !normalize_name(n).is_empty()) {
+                    if [1, 16, 21].contains(&name.name_id) {
+                        family_names.insert(decoded.clone());
+                    }
+                    names.insert(decoded);
                 }
             }
             if names.is_empty() {
@@ -117,6 +126,9 @@ impl ScanReport {
                 path: path.to_owned(),
                 face_index,
                 names: names.into_iter().collect(),
+                family_names: family_names.into_iter().collect(),
+                weight: face.weight().to_number(),
+                italic: face.is_italic() || face.is_oblique(),
             });
         }
     }
@@ -140,27 +152,39 @@ pub struct ResolveReport {
 pub struct FontIndex {
     faces: Vec<FontFace>,
     names: BTreeMap<String, BTreeSet<usize>>,
+    families: BTreeMap<String, BTreeSet<usize>>,
 }
 
 impl FontIndex {
     pub fn new(faces: impl IntoIterator<Item = FontFace>) -> Self {
-        let mut merged: BTreeMap<(PathBuf, u32), BTreeSet<String>> = BTreeMap::new();
+        let mut merged: BTreeMap<(PathBuf, u32), FontFace> = BTreeMap::new();
         for face in faces {
-            merged
-                .entry((face.path, face.face_index))
-                .or_default()
-                .extend(face.names);
+            let existing = merged
+                .entry((face.path.clone(), face.face_index))
+                .or_insert_with(|| face.clone());
+            existing.names.extend(face.names);
+            existing.family_names.extend(face.family_names);
         }
         let faces: Vec<_> = merged
-            .into_iter()
-            .map(|((path, face_index), names)| FontFace {
-                path,
-                face_index,
-                names: names.into_iter().collect(),
+            .into_values()
+            .map(|mut face| {
+                face.names.extend(face.family_names.iter().cloned());
+                face.names.sort();
+                face.names.dedup();
+                face.family_names.sort();
+                face.family_names.dedup();
+                face
             })
             .collect();
         let mut names: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
+        let mut families: BTreeMap<String, BTreeSet<usize>> = BTreeMap::new();
         for (id, face) in faces.iter().enumerate() {
+            for name in &face.family_names {
+                let key = normalize_name(name);
+                if !key.is_empty() {
+                    families.entry(key).or_default().insert(id);
+                }
+            }
             for name in &face.names {
                 let key = normalize_name(name);
                 if !key.is_empty() {
@@ -168,17 +192,31 @@ impl FontIndex {
                 }
             }
         }
-        Self { faces, names }
+        Self {
+            faces,
+            names,
+            families,
+        }
     }
 
+    /// Family aliases require exact weight and italic matches. Other aliases
+    /// identify concrete faces regardless of requested styling. If an alias is
+    /// both a family and a full name, the family interpretation takes precedence.
+    /// No nearest-weight fallback, synthesis, or variable-font instancing occurs.
     pub fn resolve(&self, references: &[FontReference]) -> ResolveReport {
         let mut report = ResolveReport::default();
         for reference in references {
-            let candidates = self
-                .names
-                .get(&normalize_name(&reference.name))
+            let key = normalize_name(&reference.name);
+            let family = self.families.get(&key);
+            let candidates = family
+                .or_else(|| self.names.get(&key))
                 .into_iter()
                 .flatten()
+                .filter(|&&i| {
+                    family.is_none()
+                        || (self.faces[i].weight == reference.weight
+                            && self.faces[i].italic == reference.italic)
+                })
                 .map(|&i| self.faces[i].clone())
                 .collect::<Vec<_>>();
             let count = candidates.len();

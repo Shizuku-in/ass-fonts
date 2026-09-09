@@ -1,6 +1,7 @@
 //! Extract fonts used by ASS/SSA dialogue and resolve them using font name tables.
 //!
-//! Matching is by name only, not glyph coverage or renderer-specific fallback.
+//! Family matches use weight and italic attributes; glyph coverage and
+//! renderer-specific fallback are outside this library's scope.
 mod fonts;
 mod subtitle;
 

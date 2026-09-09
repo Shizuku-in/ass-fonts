@@ -5,8 +5,34 @@ use std::{collections::BTreeMap, fs, io, path::Path};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FontReference {
     pub name: String,
+    /// Requested weight: 400 for normal, 700 for bold, or an explicit ASS weight.
+    pub weight: u16,
+    pub italic: bool,
     /// One-based source line numbers, sorted and unique.
     pub lines: Vec<usize>,
+}
+
+struct Style {
+    font: String,
+    weight: u16,
+    italic: bool,
+}
+
+fn weight(value: &str) -> Option<u16> {
+    match value.trim().parse::<i32>().ok()? {
+        0 => Some(400),
+        -1 | 1 => Some(700),
+        n @ 100..=900 => Some(n as u16),
+        _ => None,
+    }
+}
+
+fn italic(value: &str) -> Option<bool> {
+    match value.trim().parse::<i32>().ok()? {
+        0 => Some(false),
+        -1 | 1 => Some(true),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -72,7 +98,7 @@ fn diagnostic(out: &mut SubtitleFonts, line: usize, message: impl Into<String>) 
 /// are collected. Invalid records are diagnosed and skipped.
 pub fn extract_fonts(text: &str) -> SubtitleFonts {
     let mut out = SubtitleFonts::default();
-    let mut styles = BTreeMap::<String, String>::new();
+    let mut styles = BTreeMap::<String, Style>::new();
     let mut events = Vec::new();
     let mut section = String::new();
     let mut style_format = Vec::new();
@@ -119,7 +145,21 @@ pub fn extract_fonts(text: &str) -> SubtitleFonts {
                     (Some(name), Some(font))
                         if !name.is_empty() && !normalize_name(font).is_empty() =>
                     {
-                        if styles.insert(name.into(), font.into()).is_some() {
+                        let bold = field(&style_format, &values, "bold").unwrap_or("0");
+                        let slant = field(&style_format, &values, "italic").unwrap_or("0");
+                        if weight(bold).is_none() || italic(slant).is_none() {
+                            diagnostic(
+                                &mut out,
+                                line,
+                                "invalid Bold/Italic; invalid properties use normal defaults",
+                            );
+                        }
+                        let style = Style {
+                            font: font.into(),
+                            weight: weight(bold).unwrap_or(400),
+                            italic: italic(slant).unwrap_or(false),
+                        };
+                        if styles.insert(name.into(), style).is_some() {
                             diagnostic(
                                 &mut out,
                                 line,
@@ -164,11 +204,7 @@ pub fn extract_fonts(text: &str) -> SubtitleFonts {
                 format!("unknown style {style:?}; using Default if available"),
             );
         }
-        let mut state = State {
-            font: base.map(String::as_str),
-            style_font: base.map(String::as_str),
-            drawing: false,
-        };
+        let mut state = State::new(base);
         let mut remaining = text;
         while let Some(open) = remaining.find('{') {
             collect(&remaining[..open], &state, line, &mut references);
@@ -183,7 +219,7 @@ pub fn extract_fonts(text: &str) -> SubtitleFonts {
             let close = open + 1 + close;
             apply_tags(
                 &remaining[open + 1..close],
-                base.map(String::as_str),
+                base,
                 &styles,
                 &mut state,
                 line,
@@ -200,11 +236,30 @@ pub fn extract_fonts(text: &str) -> SubtitleFonts {
 
 struct State<'a> {
     font: Option<&'a str>,
-    style_font: Option<&'a str>,
+    style: Option<&'a Style>,
+    weight: u16,
+    italic: bool,
     drawing: bool,
 }
 
-fn collect(text: &str, state: &State<'_>, line: usize, refs: &mut BTreeMap<String, FontReference>) {
+impl<'a> State<'a> {
+    fn new(style: Option<&'a Style>) -> Self {
+        Self {
+            font: style.map(|s| s.font.as_str()),
+            style,
+            weight: style.map_or(400, |s| s.weight),
+            italic: style.is_some_and(|s| s.italic),
+            drawing: false,
+        }
+    }
+}
+
+fn collect(
+    text: &str,
+    state: &State<'_>,
+    line: usize,
+    refs: &mut BTreeMap<(String, u16, bool), FontReference>,
+) {
     if state.drawing {
         return;
     }
@@ -217,9 +272,11 @@ fn collect(text: &str, state: &State<'_>, line: usize, refs: &mut BTreeMap<Strin
     }
     if let Some(font) = state.font.filter(|s| !normalize_name(s).is_empty()) {
         let entry = refs
-            .entry(normalize_name(font))
+            .entry((normalize_name(font), state.weight, state.italic))
             .or_insert_with(|| FontReference {
                 name: font.trim().into(),
+                weight: state.weight,
+                italic: state.italic,
                 lines: Vec::new(),
             });
         if entry.lines.last() != Some(&line) {
@@ -230,8 +287,8 @@ fn collect(text: &str, state: &State<'_>, line: usize, refs: &mut BTreeMap<Strin
 
 fn apply_tags<'a>(
     block: &'a str,
-    base: Option<&'a str>,
-    styles: &'a BTreeMap<String, String>,
+    base: Option<&'a Style>,
+    styles: &'a BTreeMap<String, Style>,
     state: &mut State<'a>,
     line: usize,
     out: &mut SubtitleFonts,
@@ -253,16 +310,16 @@ fn apply_tags<'a>(
         let tag = block[pair[0] + 1..pair[1]].trim();
         if let Some(name) = tag.strip_prefix("fn") {
             state.font = if name.trim().is_empty() {
-                state.style_font
+                state.style.map(|s| s.font.as_str())
             } else {
                 Some(name.trim())
             };
         } else if let Some(name) = tag.strip_prefix('r') {
             let name = name.trim();
-            state.style_font = if name.is_empty() {
+            let style = if name.is_empty() {
                 base
             } else {
-                let font = styles.get(name).map(String::as_str);
+                let font = styles.get(name);
                 if font.is_none() {
                     diagnostic(
                         out,
@@ -272,13 +329,42 @@ fn apply_tags<'a>(
                 }
                 font.or(base)
             };
-            state.font = state.style_font;
-            state.drawing = false;
+            *state = State::new(style);
+        } else if let Some(value) = property(tag, 'b') {
+            if value.is_empty() {
+                state.weight = state.style.map_or(400, |s| s.weight);
+            } else if let Some(weight) = weight(value) {
+                state.weight = weight;
+            } else {
+                diagnostic(out, line, format!("invalid bold override {tag:?}; ignored"));
+            }
+        } else if let Some(value) = property(tag, 'i') {
+            if value.is_empty() {
+                state.italic = state.style.is_some_and(|s| s.italic);
+            } else if let Some(italic) = italic(value) {
+                state.italic = italic;
+            } else {
+                diagnostic(
+                    out,
+                    line,
+                    format!("invalid italic override {tag:?}; ignored"),
+                );
+            }
         } else if let Some(value) = tag
             .strip_prefix('p')
             .and_then(|v| v.trim().parse::<i32>().ok())
         {
             state.drawing = value > 0;
         }
+    }
+}
+
+// Do not mistake bord/be/blur/iclip for the single-letter b/i tags.
+fn property(tag: &str, prefix: char) -> Option<&str> {
+    let value = tag.strip_prefix(prefix)?.trim();
+    if value.starts_with(|c: char| c.is_ascii_alphabetic()) {
+        None
+    } else {
+        Some(value)
     }
 }
