@@ -34,6 +34,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 cargo run --example report -- movie.ass ./fonts
 ```
 
+收集字体时，可允许由渲染器合成样式（目前仅支持粗体）：
+
+```rust
+let report = index.resolve_with_mode(
+    &subtitle.references,
+    ass_fonts::ResolveMode::AllowStyleSynthesis,
+);
+```
+
+```sh
+cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
+```
+
+默认 `resolve` 仍为严格模式。可选模式优先选择精确匹配的家族变体，再允许斜体状态相同的 400 字重字体满足 700 字重请求。多个合适候选仍返回歧义。`matches[].synthetic_bold: true` 标记需要加粗的候选，包括适用此规则的具体名称匹配。本库不生成字体文件，也未验证实际渲染效果。
+
 每个条目包含 `candidates` 和 `matches`（每个候选对应一条匹配依据）。缺失条目的候选及匹配依据为空，并附带：
 
 | `missing_reason` | 含义 | `available_variants` |
@@ -62,7 +77,7 @@ cargo run --example report -- movie.ass ./fonts
 
 `read_subtitle` 支持 UTF-8 和带 BOM 的 UTF-16 LE/BE。传统编码字幕请先解码，再传入 `extract_fonts`。
 
-本库不模拟渲染、不检查字形覆盖、不合成样式、不选择最近字重、不实例化可变字体、不处理字体回退、不提取内嵌字体，也不自动发现系统字体目录。请显式提供字体路径，并检查诊断以了解结果是否完整。
+本库不模拟渲染、不检查字形覆盖、不生成合成字体、不选择最近字重、不实例化可变字体、不处理跨家族字体回退、不提取内嵌字体，也不自动发现系统字体目录。可选粗体合成策略仅支持 400→700，不合成斜体，也不回退到 Light 字体。请显式提供字体路径，并检查诊断以了解结果是否完整。
 
 ## 开发
 

@@ -6,7 +6,7 @@ mod fonts;
 mod subtitle;
 
 pub use fonts::{
-    FontFace, FontIndex, FontName, MatchEvidence, MissingReason, NameKind, Resolution,
+    FontFace, FontIndex, FontName, MatchEvidence, MissingReason, NameKind, Resolution, ResolveMode,
     ResolveReport, ScanIssue, ScanReport,
 };
 pub use subtitle::{Diagnostic, FontReference, SubtitleFonts, extract_fonts, read_subtitle};

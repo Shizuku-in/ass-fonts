@@ -34,6 +34,21 @@ Run the JSON report example:
 cargo run --example report -- movie.ass ./fonts
 ```
 
+To allow renderer-side style synthesis when collecting fonts (currently bold only):
+
+```rust
+let report = index.resolve_with_mode(
+    &subtitle.references,
+    ass_fonts::ResolveMode::AllowStyleSynthesis,
+);
+```
+
+```sh
+cargo run --example report -- --allow-style-synthesis movie.ass ./fonts
+```
+
+The default `resolve` remains strict. The optional mode first prefers exact family matches, then permits a weight 400 face for a weight 700 request with the same italic state. Multiple eligible faces remain ambiguous. `matches[].synthetic_bold: true` marks each candidate requiring emboldening, including explicit-name matches where this rule applies. No font file is generated; rendering and visual quality are not verified.
+
 Each entry includes `candidates` and `matches` (one provenance record per candidate). Missing entries have empty candidates and matches, plus:
 
 | `missing_reason` | Meaning | `available_variants` |
@@ -62,7 +77,7 @@ References are grouped by name, weight, and italic state. Normal/bold map to 400
 
 `read_subtitle` accepts UTF-8 and BOM-marked UTF-16 LE/BE. For legacy encodings, decode the text first and pass it to `extract_fonts`.
 
-This library does not simulate rendering, check glyph coverage, synthesize styles, choose the nearest weight, instantiate variable fonts, resolve font fallback, extract embedded fonts, or discover system font directories. Supply font paths explicitly and check diagnostics for incomplete results.
+This library does not simulate rendering, check glyph coverage, generate synthesized fonts, choose the nearest weight, instantiate variable fonts, resolve cross-family font fallback, extract embedded fonts, or discover system font directories. The optional synthetic-bold policy supports only 400→700, with no italic synthesis or Light fallback. Supply font paths explicitly and check diagnostics for incomplete results.
 
 ## Development
 

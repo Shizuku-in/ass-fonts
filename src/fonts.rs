@@ -176,6 +176,20 @@ pub struct MatchEvidence {
     pub path: PathBuf,
     pub face_index: u32,
     pub matched_names: Vec<FontName>,
+    /// The selected face needs renderer-side emboldening. No font is generated.
+    pub synthetic_bold: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ResolveMode {
+    #[default]
+    Strict,
+    /// Allow renderer-side style synthesis. Currently only bold is supported:
+    /// weight 400 faces for weight 700 requests, keeping italic unchanged.
+    /// Exact family matches always take precedence. This is a collection policy,
+    /// not an emulation of a particular renderer's font selection algorithm.
+    AllowStyleSynthesis,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,11 +294,23 @@ impl FontIndex {
     /// both a family and a full name, the family interpretation takes precedence.
     /// No nearest-weight fallback, synthesis, or variable-font instancing occurs.
     pub fn resolve(&self, references: &[FontReference]) -> ResolveReport {
+        self.resolve_with_mode(references, ResolveMode::Strict)
+    }
+
+    /// Resolve with an explicit policy. Synthetic bold uses only weight 400 for
+    /// weight 700, never a Light face or a mismatched italic variant. Tied normal
+    /// faces remain ambiguous. Specific-name matches keep their existing face
+    /// selection, and are marked if this same synthesis rule applies.
+    pub fn resolve_with_mode(
+        &self,
+        references: &[FontReference],
+        mode: ResolveMode,
+    ) -> ResolveReport {
         let mut report = ResolveReport::default();
         for reference in references {
             let key = normalize_name(&reference.name);
             let family = self.families.get(&key);
-            let candidates = family
+            let mut candidates = family
                 .or_else(|| self.names.get(&key))
                 .into_iter()
                 .flatten()
@@ -295,6 +321,15 @@ impl FontIndex {
                 })
                 .map(|&i| self.faces[i].clone())
                 .collect::<Vec<_>>();
+            if candidates.is_empty() && mode == ResolveMode::AllowStyleSynthesis {
+                candidates = family
+                    .into_iter()
+                    .flatten()
+                    .map(|&i| &self.faces[i])
+                    .filter(|face| needs_synthetic_bold(reference, face))
+                    .cloned()
+                    .collect();
+            }
             let count = candidates.len();
             let missing_reason = (count == 0).then_some(if family.is_some() {
                 MissingReason::StyleNotFound
@@ -315,6 +350,8 @@ impl FontIndex {
                 .map(|face| MatchEvidence {
                     path: face.path.clone(),
                     face_index: face.face_index,
+                    synthetic_bold: mode == ResolveMode::AllowStyleSynthesis
+                        && needs_synthetic_bold(reference, face),
                     matched_names: face
                         .name_records
                         .iter()
@@ -341,4 +378,8 @@ impl FontIndex {
         }
         report
     }
+}
+
+fn needs_synthetic_bold(reference: &FontReference, face: &FontFace) -> bool {
+    reference.weight == 700 && face.weight == 400 && reference.italic == face.italic
 }
