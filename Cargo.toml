@@ -2,8 +2,25 @@
 name = "ass-fonts"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.87"
 description = "Analyze and resolve font dependencies in ASS/SSA subtitles."
 license = "MIT"
+readme = "README.md"
+repository = "https://github.com/Shizuku-in/ass-fonts"
+keywords = ["ass", "ssa", "subtitles", "fonts"]
+include = [
+    "/src/**/*.rs",
+    "/tests/**/*.rs",
+    "/examples/report.rs",
+    "/examples/sample.ass",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/LICENSE",
+    "/README.md",
+    "/README-zh.md",
+    "/CHANGELOG.md",
+    "/RELEASING.md",
+]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

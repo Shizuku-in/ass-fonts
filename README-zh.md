@@ -4,6 +4,8 @@
 
 Rust 库：提取 ASS/SSA 对白实际使用的字体，扫描本地字体文件，并按字体内部名称匹配。
 
+要求 Rust **1.87+**，采用 [MIT 许可证](LICENSE)。
+
 - 跟踪 ASS/SSA 样式及 `\fn`、`\b`、`\i`、`\r`，排除未使用样式、注释和绘图内容。
 - 扫描 TTF、OTF、TTC、OTC，包括字体集合中的全部 face。
 - 返回 `resolved`（唯一候选）、`missing`（无候选）或 `ambiguous`（多个候选），附带引用行号、文件路径和 face 索引。
@@ -109,6 +111,8 @@ cargo run --example report -- --nearest-weight --allow-style-synthesis movie.ass
 ## 开发
 
 ```sh
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
 ```
+
+CI 平台矩阵、最低 Rust 版本验证与发布包检查见[发布准备说明](RELEASING.md)；API 和 JSON 行为说明见 [CHANGELOG.md](CHANGELOG.md)。本地 `real-test` 字体和字幕不会进入 crate 发布包。

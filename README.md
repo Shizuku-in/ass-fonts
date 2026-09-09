@@ -4,6 +4,8 @@ English | [简体中文](README-zh.md)
 
 A Rust library that extracts fonts used in ASS/SSA dialogue, scans local font files, and matches references against internal font names.
 
+Requires Rust **1.87+**. Licensed under [MIT](LICENSE).
+
 - Tracks ASS/SSA styles, `\fn`, `\b`, `\i`, and `\r`; skips unused styles, comments, and drawing content.
 - Scans TTF, OTF, TTC, and OTC, including every face in font collections.
 - Returns `resolved` (one candidate), `missing` (none), or `ambiguous` (multiple), with source line numbers, file paths, and face indices.
@@ -109,6 +111,8 @@ This library does not simulate rendering, check glyph coverage, generate synthes
 ## Development
 
 ```sh
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
 ```
+
+See [release preparation](RELEASING.md) for the CI matrix, MSRV checks, and package audit, and [CHANGELOG.md](CHANGELOG.md) for API/JSON behavior notes. Local `real-test` fonts and subtitles are excluded from the crate package.
