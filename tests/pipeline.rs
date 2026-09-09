@@ -1,4 +1,7 @@
-use ass_fonts::{FontFace, FontIndex, FontReference, ScanReport, extract_fonts, read_subtitle};
+use ass_fonts::{
+    FontFace, FontIndex, FontReference, MissingReason, NameKind, ScanReport, extract_fonts,
+    read_subtitle,
+};
 
 fn script(text: &str) -> String {
     format!(
@@ -58,6 +61,7 @@ fn normalization_aliases_deduplication_and_ambiguity() {
         face_index: index,
         names: names.iter().map(|s| s.to_string()).collect(),
         family_names: vec![names[0].into()],
+        name_records: vec![],
         weight: 400,
         italic: false,
     };
@@ -97,16 +101,27 @@ fn sfnt(name: &str, base: usize, otf: bool) -> Vec<u8> {
 }
 
 fn styled_sfnt(name: &str, base: usize, otf: bool, weight: u16, italic: bool) -> Vec<u8> {
-    let utf16: Vec<u8> = name.encode_utf16().flat_map(u16::to_be_bytes).collect();
-    let mut naming = vec![0; 18];
-    put16(&mut naming, 2, 1);
-    put16(&mut naming, 4, 18);
-    put16(&mut naming, 6, 3); // Windows Unicode BMP
-    put16(&mut naming, 8, 1);
-    put16(&mut naming, 10, 0x409);
-    put16(&mut naming, 12, 1);
-    put16(&mut naming, 14, utf16.len() as u16);
-    naming.extend(utf16);
+    let records = [
+        (1, name.to_owned()),
+        (4, format!("{name} Full")),
+        (6, format!("{}-PS", name.replace(' ', ""))),
+    ];
+    let storage = 6 + 12 * records.len();
+    let mut naming = vec![0; storage];
+    put16(&mut naming, 2, records.len() as u16);
+    put16(&mut naming, 4, storage as u16);
+    for (i, (id, text)) in records.into_iter().enumerate() {
+        let utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+        let record = 6 + i * 12;
+        let offset = naming.len() - storage;
+        put16(&mut naming, record, 3); // Windows Unicode BMP
+        put16(&mut naming, record + 2, 1);
+        put16(&mut naming, record + 4, 0x409);
+        put16(&mut naming, record + 6, id);
+        put16(&mut naming, record + 8, utf16.len() as u16);
+        put16(&mut naming, record + 10, offset as u16);
+        naming.extend(utf16);
+    }
     let mut head = vec![0; 54];
     put16(&mut head, 18, 1000);
     let mut hhea = vec![0; 36];
@@ -240,10 +255,124 @@ fn family_variants_resolve_from_scanned_attributes() {
     assert_eq!(report.resolved.len(), 5);
     assert_eq!(report.missing.len(), 1);
     assert_eq!(report.missing[0].reference.weight, 600);
+    assert_eq!(
+        report.missing[0].missing_reason,
+        Some(MissingReason::StyleNotFound)
+    );
+    assert_eq!(report.missing[0].available_variants.len(), 5);
+    assert!(report.missing[0].matches.is_empty());
     assert!(report.ambiguous.is_empty());
     for resolution in report.resolved {
         assert_eq!(resolution.candidates[0].weight, resolution.reference.weight);
         assert_eq!(resolution.candidates[0].italic, resolution.reference.italic);
+    }
+}
+
+#[test]
+fn reports_scanned_name_provenance_and_distinct_missing_reasons() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("example.ttf");
+    std::fs::write(&path, sfnt("Example", 0, false)).unwrap();
+    let scan = ScanReport::scan([dir.path()]);
+    assert!(scan.issues.is_empty());
+    let index = FontIndex::new(scan.faces);
+    let parsed = extract_fonts(&script(
+        r"{\fnExample}a{\fn@example full}b{\fnEXAMPLE-PS}c{\fnUnknown}d{\fnExample\b1}e",
+    ));
+    let report = index.resolve(&parsed.references);
+    assert_eq!(report.resolved.len(), 3);
+    assert_eq!(report.missing.len(), 2);
+    for (resolution, kind) in report.resolved.iter().zip([
+        NameKind::Family,
+        NameKind::FullName,
+        NameKind::PostScriptName,
+    ]) {
+        assert_eq!(resolution.matches.len(), 1);
+        assert_eq!(resolution.matches[0].path, resolution.candidates[0].path);
+        assert_eq!(resolution.matches[0].matched_names.len(), 1);
+        assert_eq!(resolution.matches[0].matched_names[0].kind, kind);
+        assert_eq!(resolution.missing_reason, None);
+        assert!(resolution.available_variants.is_empty());
+    }
+    let absent = report
+        .missing
+        .iter()
+        .find(|r| r.reference.name == "Unknown")
+        .unwrap();
+    assert_eq!(absent.missing_reason, Some(MissingReason::NameNotFound));
+    assert!(absent.available_variants.is_empty());
+    assert!(absent.candidates.is_empty());
+    assert!(absent.matches.is_empty());
+    let style = report
+        .missing
+        .iter()
+        .find(|r| r.reference.name == "Example")
+        .unwrap();
+    assert_eq!(style.missing_reason, Some(MissingReason::StyleNotFound));
+    assert_eq!(style.available_variants.len(), 1);
+    assert_eq!(style.available_variants[0].weight, 400);
+    assert!(style.candidates.is_empty());
+    let json = serde_json::to_value(&report).unwrap();
+    assert_eq!(json["missing"][0]["missing_reason"], "style_not_found");
+    assert_eq!(json["missing"][1]["missing_reason"], "name_not_found");
+    assert!(json["resolved"][0].get("missing_reason").is_none());
+    assert_eq!(
+        json["resolved"][2]["matches"][0]["matched_names"][0]["kind"],
+        "post_script_name"
+    );
+}
+
+#[test]
+fn match_evidence_merges_aliases_and_preserves_family_precedence() {
+    use ass_fonts::FontName;
+    let face = FontFace {
+        path: "a.ttc".into(),
+        face_index: 1,
+        names: vec!["Untyped".into()],
+        family_names: vec![],
+        name_records: vec![
+            FontName {
+                name: "Example".into(),
+                kind: NameKind::Family,
+            },
+            FontName {
+                name: "Example".into(),
+                kind: NameKind::FullName,
+            },
+            FontName {
+                name: "Alias".into(),
+                kind: NameKind::FullName,
+            },
+            FontName {
+                name: "Alias".into(),
+                kind: NameKind::PostScriptName,
+            },
+        ],
+        weight: 400,
+        italic: false,
+    };
+    let mut other = face.clone();
+    other.path = "b.ttf".into();
+    let index = FontIndex::new([other, face.clone(), face]);
+    let refs = extract_fonts(&script(r"{\fnExample}a{\b1}b{\fnAlias}c{\fnUntyped}d"));
+    let report = index.resolve(&refs.references);
+    assert_eq!(report.ambiguous.len(), 3);
+    assert_eq!(report.missing.len(), 1);
+    assert_eq!(report.missing[0].available_variants.len(), 2);
+    for resolution in &report.ambiguous {
+        assert_eq!(resolution.matches.len(), 2);
+        assert_eq!(resolution.matches[0].path.to_str(), Some("a.ttc"));
+        let kinds: Vec<_> = resolution.matches[0]
+            .matched_names
+            .iter()
+            .map(|r| r.kind)
+            .collect();
+        match resolution.reference.name.as_str() {
+            "Example" => assert_eq!(kinds, [NameKind::Family]),
+            "Alias" => assert_eq!(kinds, [NameKind::FullName, NameKind::PostScriptName]),
+            "Untyped" => assert_eq!(kinds, [NameKind::InternalName]),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -254,6 +383,7 @@ fn duplicate_variants_remain_ambiguous_but_explicit_names_identify_faces() {
         face_index,
         names: vec!["Family".into(), full.into()],
         family_names: vec!["Family".into()],
+        name_records: vec![],
         weight,
         italic,
     };

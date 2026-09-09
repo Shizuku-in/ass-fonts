@@ -34,6 +34,26 @@ Run the JSON report example:
 cargo run --example report -- movie.ass ./fonts
 ```
 
+Each entry includes `candidates` and `matches` (one provenance record per candidate). Missing entries have empty candidates and matches, plus:
+
+| `missing_reason` | Meaning | `available_variants` |
+| --- | --- | --- |
+| `name_not_found` | No internal name matched | Omitted |
+| `style_not_found` | Family found, requested weight/italic unavailable | All scanned faces matching that family |
+
+`matches[].matched_names` contains the original internal names and their `kind`: `family`, `full_name`, or `post_script_name`. Caller-supplied names without type metadata use `internal_name`. Available variants are informational, not fallback selections. `missing_reason` is omitted for successful and ambiguous entries.
+
+For example, a missing-name entry in the JSON report is:
+
+```json
+{
+  "reference": { "name": "Unknown Font", "weight": 400, "italic": false, "lines": [12] },
+  "candidates": [],
+  "missing_reason": "name_not_found",
+  "matches": []
+}
+```
+
 ## Matching and scope
 
 Matching uses internal family, full, PostScript, and related names, normalized with Unicode NFKC, lowercase conversion, whitespace normalization, and removal of the ASS vertical-font `@` prefix. Filenames are not used.

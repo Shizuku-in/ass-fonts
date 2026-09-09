@@ -34,6 +34,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 cargo run --example report -- movie.ass ./fonts
 ```
 
+每个条目包含 `candidates` 和 `matches`（每个候选对应一条匹配依据）。缺失条目的候选及匹配依据为空，并附带：
+
+| `missing_reason` | 含义 | `available_variants` |
+| --- | --- | --- |
+| `name_not_found` | 没有匹配的内部名称 | 省略 |
+| `style_not_found` | 家族存在，但没有所需字重/斜体 | 扫描到的该家族全部 face |
+
+`matches[].matched_names` 保留命中的原始内部名称及 `kind`：`family`、`full_name` 或 `post_script_name`。调用方提供的名称若没有类型信息，标为 `internal_name`。已有变体仅供参考，不作为回退选择。成功和歧义条目省略 `missing_reason`。
+
+例如，JSON 报告中的名称缺失条目：
+
+```json
+{
+  "reference": { "name": "Unknown Font", "weight": 400, "italic": false, "lines": [12] },
+  "candidates": [],
+  "missing_reason": "name_not_found",
+  "matches": []
+}
+```
+
 ## 匹配规则与范围
 
 按字体内部的家族名、全名、PostScript 名及相关名称匹配，统一执行 Unicode NFKC、转小写、空白规范化，并去除 ASS 竖排字体的 `@` 前缀。匹配不使用文件名。

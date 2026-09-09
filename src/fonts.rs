@@ -14,9 +14,27 @@ pub struct FontFace {
     pub names: Vec<String>,
     /// Family aliases (name IDs 1/16/21), used for weight/italic filtering.
     pub family_names: Vec<String>,
+    /// Typed internal names for reporting match provenance. Untyped `names`
+    /// supplied by callers are reported as `internal_name`.
+    pub name_records: Vec<FontName>,
     pub weight: u16,
     /// Includes fonts marked as oblique.
     pub italic: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NameKind {
+    Family,
+    FullName,
+    PostScriptName,
+    InternalName,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct FontName {
+    pub name: String,
+    pub kind: NameKind,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -100,6 +118,7 @@ impl ScanReport {
             };
             let mut names = BTreeSet::new();
             let mut family_names = BTreeSet::new();
+            let mut name_records = BTreeSet::new();
             for name in face.names() {
                 // Family, full, PostScript, typographic family, compatible full, WWS family.
                 if ![1, 4, 6, 16, 18, 21].contains(&name.name_id) {
@@ -116,6 +135,15 @@ impl ScanReport {
                     if [1, 16, 21].contains(&name.name_id) {
                         family_names.insert(decoded.clone());
                     }
+                    name_records.insert(FontName {
+                        name: decoded.clone(),
+                        kind: match name.name_id {
+                            1 | 16 | 21 => NameKind::Family,
+                            4 | 18 => NameKind::FullName,
+                            6 => NameKind::PostScriptName,
+                            _ => unreachable!(),
+                        },
+                    });
                     names.insert(decoded);
                 }
             }
@@ -127,6 +155,7 @@ impl ScanReport {
                 face_index,
                 names: names.into_iter().collect(),
                 family_names: family_names.into_iter().collect(),
+                name_records: name_records.into_iter().collect(),
                 weight: face.weight().to_number(),
                 italic: face.is_italic() || face.is_oblique(),
             });
@@ -134,10 +163,34 @@ impl ScanReport {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MissingReason {
+    NameNotFound,
+    StyleNotFound,
+}
+
+/// All name records that matched a candidate under the selected matching rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MatchEvidence {
+    pub path: PathBuf,
+    pub face_index: u32,
+    pub matched_names: Vec<FontName>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Resolution {
     pub reference: FontReference,
     pub candidates: Vec<FontFace>,
+    /// Present only for missing entries.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub missing_reason: Option<MissingReason>,
+    /// All scanned faces of the matching family, only for `style_not_found`.
+    /// These are informational, not successful candidates or fallbacks.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub available_variants: Vec<FontFace>,
+    /// One entry per candidate, in the same order. Empty for missing entries.
+    pub matches: Vec<MatchEvidence>,
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -164,15 +217,38 @@ impl FontIndex {
                 .or_insert_with(|| face.clone());
             existing.names.extend(face.names);
             existing.family_names.extend(face.family_names);
+            existing.name_records.extend(face.name_records);
         }
         let faces: Vec<_> = merged
             .into_values()
             .map(|mut face| {
+                for record in &face.name_records {
+                    face.names.push(record.name.clone());
+                    if record.kind == NameKind::Family {
+                        face.family_names.push(record.name.clone());
+                    }
+                }
+                for name in &face.family_names {
+                    face.name_records.push(FontName {
+                        name: name.clone(),
+                        kind: NameKind::Family,
+                    });
+                }
                 face.names.extend(face.family_names.iter().cloned());
                 face.names.sort();
                 face.names.dedup();
                 face.family_names.sort();
                 face.family_names.dedup();
+                for name in &face.names {
+                    if !face.name_records.iter().any(|r| r.name == *name) {
+                        face.name_records.push(FontName {
+                            name: name.clone(),
+                            kind: NameKind::InternalName,
+                        });
+                    }
+                }
+                face.name_records.sort();
+                face.name_records.dedup();
                 face
             })
             .collect();
@@ -220,9 +296,42 @@ impl FontIndex {
                 .map(|&i| self.faces[i].clone())
                 .collect::<Vec<_>>();
             let count = candidates.len();
+            let missing_reason = (count == 0).then_some(if family.is_some() {
+                MissingReason::StyleNotFound
+            } else {
+                MissingReason::NameNotFound
+            });
+            let available_variants = if missing_reason == Some(MissingReason::StyleNotFound) {
+                family
+                    .into_iter()
+                    .flatten()
+                    .map(|&i| self.faces[i].clone())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let matches = candidates
+                .iter()
+                .map(|face| MatchEvidence {
+                    path: face.path.clone(),
+                    face_index: face.face_index,
+                    matched_names: face
+                        .name_records
+                        .iter()
+                        .filter(|r| {
+                            normalize_name(&r.name) == key
+                                && (family.is_none() || r.kind == NameKind::Family)
+                        })
+                        .cloned()
+                        .collect(),
+                })
+                .collect();
             let resolution = Resolution {
                 reference: reference.clone(),
                 candidates,
+                missing_reason,
+                available_variants,
+                matches,
             };
             match count {
                 0 => report.missing.push(resolution),

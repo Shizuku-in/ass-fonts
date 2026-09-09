@@ -5,7 +5,10 @@
 mod fonts;
 mod subtitle;
 
-pub use fonts::{FontFace, FontIndex, Resolution, ResolveReport, ScanIssue, ScanReport};
+pub use fonts::{
+    FontFace, FontIndex, FontName, MatchEvidence, MissingReason, NameKind, Resolution,
+    ResolveReport, ScanIssue, ScanReport,
+};
 pub use subtitle::{Diagnostic, FontReference, SubtitleFonts, extract_fonts, read_subtitle};
 
 /// Normalize a font name for matching. ASS's vertical-font prefix is ignored.

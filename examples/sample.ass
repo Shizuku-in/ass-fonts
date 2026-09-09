@@ -11,3 +11,4 @@ Dialogue: 0,0:00:00.00,0:00:05.00,Default,,0,0,0,,Family name: Lato
 Dialogue: 0,0:00:05.00,0:00:10.00,Default,,0,0,0,,{\fnLato-Regular}PostScript name: Lato-Regular
 Dialogue: 0,0:00:10.00,0:00:15.00,Default,,0,0,0,,{\fnAssFontsMissingExample}Missing font example
 Dialogue: 0,0:00:15.00,0:00:20.00,Default,,0,0,0,,{\b1}Bold{\i1} bold italic{\r} regular
+Dialogue: 0,0:00:20.00,0:00:25.00,Default,,0,0,0,,{\b650}Exact weight 650 requested
