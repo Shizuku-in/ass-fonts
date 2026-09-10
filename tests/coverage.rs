@@ -95,6 +95,15 @@ fn extraction_records_distinct_characters_and_source_lines() {
         .find(|reference| reference.name == "Base")
         .unwrap();
     assert_eq!(base.lines, [6, 7]);
+    assert_eq!(base.characters[0].codepoint(), "U+0041");
+    assert_eq!(
+        ass_fonts::CharacterUsage {
+            character: '😀',
+            lines: vec![],
+        }
+        .codepoint(),
+        "U+1F600"
+    );
     assert_eq!(
         base.characters
             .iter()
@@ -125,6 +134,11 @@ fn ambiguous_candidates_are_checked_independently() {
     )
     .unwrap();
     std::fs::write(dir.path().join("incomplete.ttf"), font("Example", &['A'])).unwrap();
+    std::fs::write(
+        dir.path().join("also-incomplete.ttf"),
+        font("Example", &['A']),
+    )
+    .unwrap();
     let scan = ScanReport::scan([dir.path()]);
     assert!(scan.issues.is_empty(), "{:?}", scan.issues);
     let parsed = extract_fonts(&subtitle("Example", "A中A", "中"));
@@ -133,12 +147,22 @@ fn ambiguous_candidates_are_checked_independently() {
 
     let coverage = resolved.check_coverage();
     assert_eq!(coverage.complete.len(), 1);
-    assert_eq!(coverage.incomplete.len(), 1);
+    assert_eq!(coverage.incomplete.len(), 2);
     assert!(coverage.uncheckable.is_empty());
     assert_eq!(coverage.complete[0].checked_characters, 2);
     assert_eq!(coverage.incomplete[0].checked_characters, 2);
     assert_eq!(coverage.incomplete[0].missing_characters[0].character, '中');
     assert_eq!(coverage.incomplete[0].missing_characters[0].lines, [6, 7]);
+    let summary = coverage.summary();
+    assert_eq!(summary.complete_candidates, 1);
+    assert_eq!(summary.incomplete_candidates, 2);
+    assert_eq!(summary.uncheckable_candidates, 0);
+    assert_eq!(summary.unresolved_references, 0);
+    assert_eq!(summary.missing_mappings, 2);
+    assert_eq!(summary.unique_missing_characters, 1);
+    assert_eq!(coverage.missing_characters()[0].character, '中');
+    assert_eq!(coverage.missing_characters()[0].lines, [6, 7]);
+    assert!(!coverage.is_complete());
 }
 
 #[test]
@@ -169,6 +193,9 @@ fn missing_and_unreadable_fonts_are_uncheckable() {
         Some(MissingReason::NameNotFound)
     );
     assert!(coverage.uncheckable[0].candidate.is_none());
+    assert_eq!(coverage.summary().unresolved_references, 1);
+    assert_eq!(coverage.summary().uncheckable_candidates, 0);
+    assert!(!coverage.is_complete());
 
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("gone.ttf");
@@ -183,6 +210,8 @@ fn missing_and_unreadable_fonts_are_uncheckable() {
         coverage.uncheckable[0].reason,
         CoverageUnavailableReason::FontReadError
     );
+    assert_eq!(coverage.summary().uncheckable_candidates, 1);
+    assert_eq!(coverage.summary().unresolved_references, 0);
 }
 
 #[test]

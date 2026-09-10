@@ -1,6 +1,10 @@
 use crate::{CharacterUsage, FontFace, FontReference, MissingReason, Resolution, ResolveReport};
 use serde::Serialize;
-use std::{collections::BTreeMap, fs, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::PathBuf,
+};
 
 /// Nominal cmap coverage for one selected font face.
 ///
@@ -62,6 +66,88 @@ pub struct CoverageReport {
     pub incomplete: Vec<CoverageCheck>,
     /// Requests or candidates that could not be checked.
     pub uncheckable: Vec<UncheckableCoverage>,
+}
+
+/// Compact candidate and missing-character counts for a [`CoverageReport`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CoverageSummary {
+    /// Selected candidates mapping every checked character.
+    pub complete_candidates: usize,
+    /// Selected candidates missing at least one checked character.
+    pub incomplete_candidates: usize,
+    /// Selected candidates whose files or faces could not be checked.
+    pub uncheckable_candidates: usize,
+    /// Font references for which matching selected no candidate.
+    pub unresolved_references: usize,
+    /// Sum of missing characters across incomplete candidates.
+    pub missing_mappings: usize,
+    /// Distinct missing Unicode scalar values across incomplete candidates.
+    pub unique_missing_characters: usize,
+}
+
+impl CoverageReport {
+    /// Return compact counts without discarding the detailed report.
+    pub fn summary(&self) -> CoverageSummary {
+        let missing = self
+            .incomplete
+            .iter()
+            .flat_map(|check| &check.missing_characters);
+        let mut unique = BTreeSet::new();
+        let mut missing_mappings = 0;
+        for usage in missing {
+            missing_mappings += 1;
+            unique.insert(usage.character);
+        }
+        CoverageSummary {
+            complete_candidates: self.complete.len(),
+            incomplete_candidates: self.incomplete.len(),
+            uncheckable_candidates: self
+                .uncheckable
+                .iter()
+                .filter(|entry| entry.candidate.is_some())
+                .count(),
+            unresolved_references: self
+                .uncheckable
+                .iter()
+                .filter(|entry| entry.candidate.is_none())
+                .count(),
+            missing_mappings,
+            unique_missing_characters: unique.len(),
+        }
+    }
+
+    /// Whether every selected candidate has complete nominal coverage.
+    ///
+    /// Returns `false` for missing font references and unreadable or invalid
+    /// candidates. An empty report is complete.
+    pub fn is_complete(&self) -> bool {
+        self.incomplete.is_empty() && self.uncheckable.is_empty()
+    }
+
+    /// Aggregate missing characters across all candidates.
+    ///
+    /// Characters and their source lines are sorted and deduplicated. Candidate
+    /// identity is intentionally discarded; use [`Self::incomplete`] when it matters.
+    pub fn missing_characters(&self) -> Vec<CharacterUsage> {
+        let mut characters = BTreeMap::<char, BTreeSet<usize>>::new();
+        for usage in self
+            .incomplete
+            .iter()
+            .flat_map(|check| &check.missing_characters)
+        {
+            characters
+                .entry(usage.character)
+                .or_default()
+                .extend(&usage.lines);
+        }
+        characters
+            .into_iter()
+            .map(|(character, lines)| CharacterUsage {
+                character,
+                lines: lines.into_iter().collect(),
+            })
+            .collect()
+    }
 }
 
 /// Reopen selected font files and check extracted characters against each face's cmap.

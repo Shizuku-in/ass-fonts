@@ -7,7 +7,8 @@
 - Extract distinct dialogue characters per font request with source-line provenance.
 - Check each resolved or ambiguous candidate's nominal cmap coverage with `check_coverage` or `ResolveReport::check_coverage`.
 - Report coverage as `complete`, `incomplete`, or `uncheckable`; distinguish missing candidates, file read failures, and face parse failures.
-- Add `--check-coverage` to the JSON report example.
+- Add `CoverageReport::summary`, `is_complete`, and aggregated `missing_characters`, plus `CharacterUsage::codepoint` for display.
+- Add `--check-coverage`, compact `--summary`, and opt-in CI failure policies to the JSON report example.
 
 ### Breaking changes
 

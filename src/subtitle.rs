@@ -32,6 +32,13 @@ pub struct CharacterUsage {
     pub lines: Vec<usize>,
 }
 
+impl CharacterUsage {
+    /// Format the character as an uppercase Unicode code point such as `U+0041`.
+    pub fn codepoint(&self) -> String {
+        format!("U+{:04X}", self.character as u32)
+    }
+}
+
 struct Style {
     font: String,
     weight: u16,

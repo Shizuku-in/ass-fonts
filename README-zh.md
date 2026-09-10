@@ -43,6 +43,19 @@ cargo run --example report -- --check-coverage movie.ass ./fonts
 
 `check_coverage` 会重新读取每个已选字体文件，检查分配给该引用的去重字符。歧义匹配按候选分别检查，因此候选 A 可以完整而候选 B 缺字。没有候选，或之后无法读取、解析的文件/face 会进入 `uncheckable`。这里只检查 Unicode cmap 的名义映射，不执行文本塑形和渲染，不应用跨家族回退，也不验证变体序列及视觉质量。
 
+使用 `coverage.summary()` 获取候选与缺字计数，使用 `coverage.is_complete()` 执行严格成功判断，使用 `coverage.missing_characters()` 获取合并来源行后的全局去重缺字。`CharacterUsage::codepoint()` 可生成 `U+5B57` 形式的码点。
+
+紧凑 JSON 与 CI 检查示例：
+
+```sh
+cargo run --example report -- --summary movie.ass ./fonts
+cargo run --example report -- --summary \
+  --fail-on-missing-font --fail-on-ambiguous-font \
+  --fail-on-missing-glyph --fail-on-uncheckable movie.ass ./fonts
+```
+
+`--summary` 会自动检查覆盖，并输出带码点及行号的聚合缺字。失败策略默认关闭：参数错误退出码为 2；启用相应策略后，字体匹配失败为 3、缺字为 4、覆盖不可检查为 5；其他运行错误为 1。多个条件同时发生时，优先级依次为字体匹配、缺字、不可检查。
+
 收集字体时，可允许由渲染器合成样式（粗体和斜体）：
 
 ```rust

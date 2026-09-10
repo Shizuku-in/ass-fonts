@@ -46,7 +46,8 @@ mod fonts;
 mod subtitle;
 
 pub use coverage::{
-    CoverageCheck, CoverageReport, CoverageUnavailableReason, UncheckableCoverage, check_coverage,
+    CoverageCheck, CoverageReport, CoverageSummary, CoverageUnavailableReason, UncheckableCoverage,
+    check_coverage,
 };
 pub use fonts::{
     FontFace, FontIndex, FontName, MatchEvidence, MissingReason, NameKind, Resolution, ResolveMode,

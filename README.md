@@ -43,6 +43,19 @@ cargo run --example report -- --check-coverage movie.ass ./fonts
 
 `check_coverage` reopens each selected font file and checks the distinct characters assigned to that request. Ambiguous resolutions are checked once per candidate, so one candidate may be complete while another is incomplete. Missing resolutions and files/faces that can no longer be read or parsed are `uncheckable`. The check uses nominal Unicode cmap mappings only: it does not shape or render text, apply cross-family fallback, or verify variation sequences and visual quality.
 
+Use `coverage.summary()` for candidate and missing-character counts, `coverage.is_complete()` for a strict success check, and `coverage.missing_characters()` for a deduplicated list with merged source lines. `CharacterUsage::codepoint()` formats a value such as `U+5B57`.
+
+For compact JSON and CI checks:
+
+```sh
+cargo run --example report -- --summary movie.ass ./fonts
+cargo run --example report -- --summary \
+  --fail-on-missing-font --fail-on-ambiguous-font \
+  --fail-on-missing-glyph --fail-on-uncheckable movie.ass ./fonts
+```
+
+`--summary` automatically checks coverage and includes aggregated missing characters with code points and lines. Failure policies are opt-in: argument errors exit with code 2, requested font matching failures with 3, missing glyphs with 4, and uncheckable coverage with 5. Other runtime errors use code 1. If several enabled conditions occur, the order is font matching, missing glyphs, then uncheckable coverage.
+
 To allow renderer-side style synthesis when collecting fonts (bold and italic):
 
 ```rust
