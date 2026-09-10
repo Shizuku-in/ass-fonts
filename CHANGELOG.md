@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-09-10
 
 ### Added
 
@@ -12,7 +12,7 @@
 
 ### Breaking changes
 
-- `FontReference` now requires a `characters: Vec<CharacterUsage>` field. This is planned for 0.2.0 because direct struct construction and serialized output change.
+- `FontReference` now requires a `characters: Vec<CharacterUsage>` field; manual struct construction and serialized output therefore change.
 
 ### Limitations
 
