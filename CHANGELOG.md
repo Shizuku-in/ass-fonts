@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 - 2026-09-10
+
+### Development
+
+- Extend Criterion coverage with warm scanning of 100 synthetic TTF files and cmap checks for 100 references sharing one or ten font faces.
+
 ## 0.2.1 - 2026-09-10
 
 ### Development

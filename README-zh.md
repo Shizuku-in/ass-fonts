@@ -139,4 +139,6 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo bench --locked --bench pipeline
 ```
 
+基准使用运行时生成、可再分发的测试数据。字体扫描测量的是操作系统文件缓存预热后的性能，不代表冷磁盘读取速度。
+
 字幕解析与字体匹配的模糊测试见[模糊测试说明](FUZZING.md)；CI 平台矩阵、最低 Rust 版本验证与发布包检查见[发布准备说明](RELEASING.md)；API 和 JSON 行为说明见 [CHANGELOG.md](CHANGELOG.md)。本地 `real-test` 字体和字幕不会进入 crate 发布包。
