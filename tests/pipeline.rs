@@ -74,6 +74,7 @@ fn normalization_aliases_deduplication_and_ambiguity() {
             weight: 400,
             italic: false,
             lines: vec![1],
+            characters: vec![],
         })
         .collect();
     let report = index.resolve(&references);

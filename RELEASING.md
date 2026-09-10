@@ -27,4 +27,4 @@ The script runs `cargo package` including Cargo's verification build, then inspe
 3. Run the clean-worktree archive audit and inspect `cargo package --locked --list`.
 4. Review the package name, registry access, release date, and release notes before performing a separate publication step.
 
-CI only tests and packages; it does not publish to crates.io, create tags, or create GitHub releases. Real-data reports under `target/` are local validation artifacts, not release fixtures. `resolved` does not guarantee glyph coverage or rendering fidelity; preserve this distinction in release notes.
+CI only tests and packages; it does not publish to crates.io, create tags, or create GitHub releases. Real-data reports under `target/` are local validation artifacts, not release fixtures. `resolved` does not guarantee glyph coverage, and a complete nominal cmap check does not guarantee shaping or rendering fidelity; preserve these distinctions in release notes.

@@ -7,8 +7,10 @@ A Rust library that extracts fonts used in ASS/SSA dialogue, scans local font fi
 Requires Rust **1.87+**. Licensed under [MIT](LICENSE).
 
 - Tracks ASS/SSA styles, `\fn`, `\b`, `\i`, and `\r`; skips unused styles, comments, and drawing content.
+- Records distinct dialogue characters and their source lines for each font request.
 - Scans TTF, OTF, TTC, and OTC, including every face in font collections.
 - Returns `resolved` (one candidate), `missing` (none), or `ambiguous` (multiple), with source line numbers, file paths, and face indices.
+- Optionally reports nominal cmap coverage as `complete`, `incomplete`, or `uncheckable`.
 - Provides parsing/scanning diagnostics and serializable reports.
 
 ## Usage
@@ -21,8 +23,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scan = ScanReport::scan(["./fonts"]);
     let index = FontIndex::new(scan.faces);
     let report = index.resolve(&subtitle.references);
+    let coverage = report.check_coverage();
 
     println!("{report:#?}");
+    println!("{coverage:#?}");
     // Check diagnostics for skipped or incomplete input.
     eprintln!("{:?}", subtitle.diagnostics);
     eprintln!("{:?}", scan.issues);
@@ -34,7 +38,10 @@ Run the JSON report example:
 
 ```sh
 cargo run --example report -- movie.ass ./fonts
+cargo run --example report -- --check-coverage movie.ass ./fonts
 ```
+
+`check_coverage` reopens each selected font file and checks the distinct characters assigned to that request. Ambiguous resolutions are checked once per candidate, so one candidate may be complete while another is incomplete. Missing resolutions and files/faces that can no longer be read or parsed are `uncheckable`. The check uses nominal Unicode cmap mappings only: it does not shape or render text, apply cross-family fallback, or verify variation sequences and visual quality.
 
 To allow renderer-side style synthesis when collecting fonts (bold and italic):
 
@@ -89,7 +96,10 @@ For example, a missing-name entry in the JSON report is:
 
 ```json
 {
-  "reference": { "name": "Unknown Font", "weight": 400, "italic": false, "lines": [12] },
+  "reference": {
+    "name": "Unknown Font", "weight": 400, "italic": false,
+    "lines": [12], "characters": [{ "character": "A", "lines": [12] }]
+  },
   "candidates": [],
   "missing_reason": "name_not_found",
   "matches": []
@@ -106,7 +116,7 @@ Generic families use the configured weight policy and prefer matching italic att
 
 `read_subtitle` accepts UTF-8 and BOM-marked UTF-16 LE/BE. For legacy encodings, decode the text first and pass it to `extract_fonts`.
 
-This library does not simulate rendering, check glyph coverage, generate synthesized fonts, instantiate variable fonts, resolve cross-family font fallback, extract embedded fonts, or discover system font directories. Synthetic bold supports only 400→700; italic synthesis permits upright→italic. These permissions may combine and do not alter font files. Light faces are not used for synthetic bold. Supply font paths explicitly and check diagnostics for incomplete results.
+This library can check nominal cmap coverage, but does not simulate shaping/rendering, generate synthesized fonts, instantiate variable fonts, resolve cross-family font fallback, extract embedded fonts, or discover system font directories. Synthetic bold supports only 400→700; italic synthesis permits upright→italic. These permissions may combine and do not alter font files. Light faces are not used for synthetic bold. Supply font paths explicitly and check diagnostics for incomplete results.
 
 ## Development
 

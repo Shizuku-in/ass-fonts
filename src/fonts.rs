@@ -376,6 +376,16 @@ pub struct ResolveReport {
     pub ambiguous: Vec<Resolution>,
 }
 
+impl ResolveReport {
+    /// Check nominal glyph coverage for every selected candidate.
+    ///
+    /// This reopens font files and is equivalent to [`crate::check_coverage`].
+    /// See that function for cmap and rendering limitations.
+    pub fn check_coverage(&self) -> crate::CoverageReport {
+        crate::check_coverage(self)
+    }
+}
+
 /// Reusable index of all supported internal names, with deterministic ordering.
 #[derive(Debug, Default)]
 pub struct FontIndex {

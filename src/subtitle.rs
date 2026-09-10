@@ -16,6 +16,20 @@ pub struct FontReference {
     pub italic: bool,
     /// One-based source line numbers, sorted and unique.
     pub lines: Vec<usize>,
+    /// Distinct rendered characters assigned to this request, sorted by code point.
+    ///
+    /// ASS hard/soft line breaks, hard spaces, Unicode whitespace, and control
+    /// characters are omitted because they do not require a visible glyph.
+    pub characters: Vec<CharacterUsage>,
+}
+
+/// One character assigned to a font request and the subtitle lines that use it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CharacterUsage {
+    /// Unicode scalar value found in dialogue text.
+    pub character: char,
+    /// One-based source line numbers containing this character, sorted and unique.
+    pub lines: Vec<usize>,
 }
 
 struct Style {
@@ -124,8 +138,9 @@ fn diagnostic(out: &mut SubtitleFonts, line: usize, message: impl Into<String>) 
 /// last and may contain commas. Styles may be defined after their dialogues.
 /// Tracks style fonts, `\fn`, `\b`, `\i`, `\r`, named resets, and `\p` drawing mode.
 /// Unused styles, comment events, override-block contents, drawing data, and
-/// whitespace-only runs do not contribute references. Tags inside parenthesized
-/// arguments are not applied as top-level overrides.
+/// whitespace-only runs do not contribute references. Each reference also records
+/// its distinct rendered characters and their source lines. Tags inside
+/// parenthesized arguments are not applied as top-level overrides.
 ///
 /// # Recovery
 ///
@@ -315,11 +330,8 @@ fn collect(
     if state.drawing {
         return;
     }
-    let visible = text
-        .replace("\\N", "")
-        .replace("\\n", "")
-        .replace("\\h", "");
-    if !visible.chars().any(|c| !c.is_whitespace()) {
+    let characters = rendered_characters(text);
+    if characters.is_empty() {
         return;
     }
     if let Some(font) = state.font.filter(|s| !normalize_name(s).is_empty()) {
@@ -330,11 +342,54 @@ fn collect(
                 weight: state.weight,
                 italic: state.italic,
                 lines: Vec::new(),
+                characters: Vec::new(),
             });
         if entry.lines.last() != Some(&line) {
             entry.lines.push(line);
         }
+        for character in characters {
+            match entry
+                .characters
+                .binary_search_by_key(&character, |usage| usage.character)
+            {
+                Ok(index) => {
+                    let lines = &mut entry.characters[index].lines;
+                    if lines.last() != Some(&line) {
+                        lines.push(line);
+                    }
+                }
+                Err(index) => entry.characters.insert(
+                    index,
+                    CharacterUsage {
+                        character,
+                        lines: vec![line],
+                    },
+                ),
+            }
+        }
     }
+}
+
+fn rendered_characters(text: &str) -> Vec<char> {
+    let mut characters = Vec::new();
+    let mut input = text.chars().peekable();
+    while let Some(character) = input.next() {
+        if character == '\\'
+            && input
+                .peek()
+                .is_some_and(|next| matches!(next, 'N' | 'n' | 'h'))
+        {
+            input.next();
+            continue;
+        }
+        if !character.is_whitespace() && !character.is_control() {
+            match characters.binary_search(&character) {
+                Ok(_) => {}
+                Err(index) => characters.insert(index, character),
+            }
+        }
+    }
+    characters
 }
 
 fn apply_tags<'a>(

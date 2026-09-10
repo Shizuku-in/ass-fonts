@@ -5,7 +5,8 @@
 //! 1. Read a subtitle with [`read_subtitle`], or parse decoded text with [`extract_fonts`].
 //! 2. Scan explicit font files or directories with [`ScanReport::scan`].
 //! 3. Build a reusable [`FontIndex`] and resolve references with [`ResolveOptions`].
-//! 4. Inspect [`ResolveReport`] together with subtitle and scanning diagnostics.
+//! 4. Optionally call [`ResolveReport::check_coverage`] for nominal cmap coverage.
+//! 5. Inspect the reports together with subtitle and scanning diagnostics.
 //!
 //! ```no_run
 //! use ass_fonts::{FontIndex, ResolveOptions, ScanReport, SynthesisPolicy,
@@ -36,18 +37,25 @@
 //! See [`FontIndex::resolve_with_options`] for selection precedence.
 //!
 //! A resolved dependency identifies a font file, not a guarantee of visual fidelity.
-//! Glyph coverage, rendering, cross-family fallback, variable-font instances,
-//! embedded font extraction, and system font directory discovery are outside scope.
+//! Nominal cmap coverage can be checked separately; shaping, rendering,
+//! cross-family fallback, variable-font instances, embedded font extraction, and
+//! system font directory discovery are outside scope.
 //! Reports implement [`serde::Serialize`]; enum values use snake_case in JSON.
+mod coverage;
 mod fonts;
 mod subtitle;
 
+pub use coverage::{
+    CoverageCheck, CoverageReport, CoverageUnavailableReason, UncheckableCoverage, check_coverage,
+};
 pub use fonts::{
     FontFace, FontIndex, FontName, MatchEvidence, MissingReason, NameKind, Resolution, ResolveMode,
     ResolveOptions, ResolveReport, ScanIssue, ScanReport, SelectionMethod, SynthesisPolicy,
     WeightMatching,
 };
-pub use subtitle::{Diagnostic, FontReference, SubtitleFonts, extract_fonts, read_subtitle};
+pub use subtitle::{
+    CharacterUsage, Diagnostic, FontReference, SubtitleFonts, extract_fonts, read_subtitle,
+};
 
 /// Normalize a font name for exact alias comparison.
 ///

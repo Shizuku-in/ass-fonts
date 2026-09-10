@@ -21,6 +21,7 @@ fn request(weight: u16, italic: bool) -> FontReference {
         weight,
         italic,
         lines: vec![1],
+        characters: vec![],
     }
 }
 

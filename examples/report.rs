@@ -3,12 +3,15 @@ use ass_fonts::{FontIndex, ResolveOptions, ScanReport, WeightMatching, read_subt
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1).peekable();
     let mut options = ResolveOptions::default();
+    let mut check_coverage = false;
     while let Some(arg) = args.peek() {
         if arg == "--allow-style-synthesis" {
             options.synthesis.bold = true;
             options.synthesis.italic = true;
         } else if arg == "--nearest-weight" {
             options.weight_matching = WeightMatching::Nearest;
+        } else if arg == "--check-coverage" {
+            check_coverage = true;
         } else if arg == "--" {
             args.next();
             break;
@@ -20,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.next();
     }
     let subtitle = args.next().ok_or(
-        "usage: report [--nearest-weight] [--allow-style-synthesis] [--] <subtitle.ass|ssa> <font file/directory>...",
+        "usage: report [--nearest-weight] [--allow-style-synthesis] [--check-coverage] [--] <subtitle.ass|ssa> <font file/directory>...",
     )?;
     let roots: Vec<_> = args.collect();
     if roots.is_empty() {
@@ -29,16 +32,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let extracted = read_subtitle(subtitle)?;
     let scanned = ScanReport::scan(roots);
     let report = FontIndex::new(scanned.faces).resolve_with_options(&extracted.references, options);
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&serde_json::json!({
-            "options": options,
-            "resolved": report.resolved,
-            "missing": report.missing,
-            "ambiguous": report.ambiguous,
-            "subtitle_diagnostics": extracted.diagnostics,
-            "scan_issues": scanned.issues,
-        }))?
-    );
+    let coverage = check_coverage.then(|| report.check_coverage());
+    let mut output = serde_json::json!({
+        "options": options,
+        "resolved": report.resolved,
+        "missing": report.missing,
+        "ambiguous": report.ambiguous,
+        "subtitle_diagnostics": extracted.diagnostics,
+        "scan_issues": scanned.issues,
+    });
+    if let Some(coverage) = coverage {
+        output["coverage"] = serde_json::to_value(coverage)?;
+    }
+    println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }

@@ -1,6 +1,23 @@
 # Changelog
 
-## 0.1.0 preparation
+## Unreleased
+
+### Added
+
+- Extract distinct dialogue characters per font request with source-line provenance.
+- Check each resolved or ambiguous candidate's nominal cmap coverage with `check_coverage` or `ResolveReport::check_coverage`.
+- Report coverage as `complete`, `incomplete`, or `uncheckable`; distinguish missing candidates, file read failures, and face parse failures.
+- Add `--check-coverage` to the JSON report example.
+
+### Breaking changes
+
+- `FontReference` now requires a `characters: Vec<CharacterUsage>` field. This is planned for 0.2.0 because direct struct construction and serialized output change.
+
+### Limitations
+
+- Coverage checks nominal Unicode cmap mappings only. They do not shape or render text, apply fallback, or verify variation sequences and visual quality.
+
+## 0.1.0 - 2026-09-10
 
 ### Features
 

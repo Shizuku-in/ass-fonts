@@ -25,7 +25,8 @@ def main():
     archive = Path(metadata["target_directory"]) / "package" / f"{prefix}.crate"
     required = {
         "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "README-zh.md",
-        "CHANGELOG.md", "RELEASING.md", "src/lib.rs", "src/fonts.rs", "src/subtitle.rs",
+        "CHANGELOG.md", "RELEASING.md", "src/lib.rs", "src/coverage.rs", "src/fonts.rs",
+        "src/subtitle.rs",
         "examples/report.rs", "examples/sample.ass",
     }
     allowed = required | {"Cargo.toml.orig", ".cargo_vcs_info.json"}
