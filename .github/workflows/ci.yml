@@ -41,6 +41,14 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - run: cargo +stable fmt --check
       - run: cargo +stable clippy --locked --all-targets -- -D warnings
+      - name: Compile performance benchmarks
+        run: cargo +stable bench --locked --bench pipeline --no-run
+      - name: Compile fuzz targets
+        run: cargo +stable check --locked --manifest-path fuzz/Cargo.toml --bins
+      - name: Check fuzz target formatting
+        run: cargo +stable fmt --manifest-path fuzz/Cargo.toml -- --check
+      - name: Lint fuzz targets
+        run: cargo +stable clippy --locked --manifest-path fuzz/Cargo.toml --bins -- -D warnings
       - name: Check public API documentation
         run: cargo +stable doc --locked --no-deps
         env:

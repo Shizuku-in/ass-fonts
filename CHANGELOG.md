@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 - 2026-09-10
+
+### Development
+
+- Add reproducible Criterion benchmarks for large subtitle extraction, font indexing, and exact/nearest resolution.
+- Add cargo-fuzz targets for ASS/SSA extraction and arbitrary font index/resolution inputs, with a seed corpus, usage guide, and scheduled sanitizer smoke runs.
+
 ## 0.2.0 - 2026-09-10
 
 ### Added

@@ -136,6 +136,7 @@ cargo run --example report -- --nearest-weight --allow-style-synthesis movie.ass
 ```sh
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
+cargo bench --locked --bench pipeline
 ```
 
-CI 平台矩阵、最低 Rust 版本验证与发布包检查见[发布准备说明](RELEASING.md)；API 和 JSON 行为说明见 [CHANGELOG.md](CHANGELOG.md)。本地 `real-test` 字体和字幕不会进入 crate 发布包。
+字幕解析与字体匹配的模糊测试见[模糊测试说明](FUZZING.md)；CI 平台矩阵、最低 Rust 版本验证与发布包检查见[发布准备说明](RELEASING.md)；API 和 JSON 行为说明见 [CHANGELOG.md](CHANGELOG.md)。本地 `real-test` 字体和字幕不会进入 crate 发布包。

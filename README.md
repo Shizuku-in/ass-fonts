@@ -136,6 +136,7 @@ This library can check nominal cmap coverage, but does not simulate shaping/rend
 ```sh
 cargo test --locked
 cargo clippy --locked --all-targets -- -D warnings
+cargo bench --locked --bench pipeline
 ```
 
-See [release preparation](RELEASING.md) for the CI matrix, MSRV checks, and package audit, and [CHANGELOG.md](CHANGELOG.md) for API/JSON behavior notes. Local `real-test` fonts and subtitles are excluded from the crate package.
+See [fuzzing](FUZZING.md) for the subtitle and resolver targets, [release preparation](RELEASING.md) for the CI matrix, MSRV checks, and package audit, and [CHANGELOG.md](CHANGELOG.md) for API/JSON behavior notes. Local `real-test` fonts and subtitles are excluded from the crate package.

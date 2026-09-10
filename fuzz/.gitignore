@@ -1,0 +1,6 @@
+/artifacts
+/corpus/**
+!/corpus/subtitle/
+!/corpus/subtitle/basic.ass
+/coverage
+/target

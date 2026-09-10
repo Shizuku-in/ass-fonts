@@ -1,0 +1,7 @@
+[V4+ Styles]
+Format: Name,Fontname,Bold,Italic
+Style: Default,Example Sans,0,0
+Style: Alt,Example Serif,-1,-1
+[Events]
+Format: Style,Text
+Dialogue: Default,Hello{\b1}bold{\i1}italic{\rAlt}字幕{\p1}m 0 0 l 1 1{\p0}end

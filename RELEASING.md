@@ -10,10 +10,13 @@ cargo +1.87.0 test --locked --all-targets
 cargo +1.87.0 test --locked --doc
 cargo +stable fmt --check
 cargo +stable clippy --locked --all-targets -- -D warnings
+cargo +stable bench --locked --bench pipeline --no-run
 cargo +stable test --locked --all-targets
 cargo +stable test --locked --doc
 RUSTDOCFLAGS='-D warnings -D missing_docs' cargo +stable doc --locked --no-deps
 python3 scripts/check-package.py
+cargo +stable check --locked --manifest-path fuzz/Cargo.toml --bins
+cargo +stable fmt --manifest-path fuzz/Cargo.toml -- --check
 ```
 
 The `RUSTDOCFLAGS` assignment shown above uses POSIX shell syntax. The packaging script needs Python 3 and Cargo; no Python packages are required. For a local preview before committing, pass `--allow-dirty`. The final release check should use a clean worktree.

@@ -25,8 +25,8 @@ def main():
     archive = Path(metadata["target_directory"]) / "package" / f"{prefix}.crate"
     required = {
         "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "README-zh.md",
-        "CHANGELOG.md", "RELEASING.md", "src/lib.rs", "src/coverage.rs", "src/fonts.rs",
-        "src/subtitle.rs",
+        "CHANGELOG.md", "FUZZING.md", "RELEASING.md", "src/lib.rs", "src/coverage.rs",
+        "src/fonts.rs", "src/subtitle.rs", "benches/pipeline.rs",
         "examples/report.rs", "examples/sample.ass",
     }
     allowed = required | {"Cargo.toml.orig", ".cargo_vcs_info.json"}
@@ -39,7 +39,7 @@ def main():
                 raise SystemExit(f"Unexpected archive entry: {member.name}")
             relative = PurePosixPath(*path.parts[1:])
             name = str(relative)
-            source = relative.parts[0] in {"src", "tests"} and relative.suffix == ".rs"
+            source = relative.parts[0] in {"src", "tests", "benches"} and relative.suffix == ".rs"
             if name not in allowed and not source:
                 raise SystemExit(f"Unexpected packaged file: {name}")
             if name in seen:
