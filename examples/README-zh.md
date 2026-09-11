@@ -1,5 +1,7 @@
 # 示例
 
+[English](README.md) | 简体中文
+
 ## JSON 报告示例
 
 ```sh
