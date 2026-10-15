@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.3 - 2026-10-15
+
+### Documentation
+
+- Condense the README matching and scope notes and sync the English and Chinese versions.
+- Remove `RELEASING.md` from the repository and the crate package.
+
+### Development
+
+- Share one synthetic font builder across integration tests and merge overlapping synthesis tests.
+
 ## 0.2.2 - 2026-09-10
 
 ### Development
