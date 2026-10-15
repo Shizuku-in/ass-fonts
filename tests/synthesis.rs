@@ -48,8 +48,28 @@ fn strict_is_default_and_synthesis_is_opt_in() {
     assert_eq!(result.reference.weight, 700);
     assert_eq!(result.missing_reason, None);
     assert!(result.available_variants.is_empty());
+    assert_eq!(
+        result.matches[0].selection_method,
+        SelectionMethod::FamilySynthesis
+    );
     let json = serde_json::to_value(&report).unwrap();
     assert_eq!(json["resolved"][0]["matches"][0]["synthetic_bold"], true);
+    // The legacy mode is shorthand for exact weights with both synthesis permissions.
+    let options = ResolveOptions {
+        weight_matching: WeightMatching::Exact,
+        synthesis: SynthesisPolicy {
+            bold: true,
+            italic: true,
+        },
+    };
+    assert_eq!(
+        json,
+        serde_json::to_value(index.resolve_with_options(&refs, options)).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(&strict).unwrap(),
+        serde_json::to_value(index.resolve_with_options(&refs, ResolveOptions::default())).unwrap()
+    );
 }
 
 #[test]
@@ -272,36 +292,37 @@ fn italic_ties_remain_ambiguous_and_synthesis_is_not_reversed() {
 }
 
 #[test]
-fn explicit_face_is_preserved_and_italic_requirement_is_reported() {
-    let index = FontIndex::new([face("upright.ttf", 400, false)]);
-    let refs = [reference("Example-Regular", 700, true)];
-    let strict = index.resolve(&refs);
-    assert_eq!(strict.resolved.len(), 1);
-    assert!(!strict.resolved[0].matches[0].synthetic_italic);
-    let report = index.resolve_with_mode(&refs, ResolveMode::AllowStyleSynthesis);
-    assert_eq!(
-        report.resolved[0].matches[0].selection_method,
-        SelectionMethod::PostScriptName
-    );
-    assert!(report.resolved[0].matches[0].synthetic_italic);
-    assert!(report.resolved[0].matches[0].synthetic_bold);
-}
-
-#[test]
 fn explicit_names_keep_their_face_and_report_synthesis_per_candidate() {
     let index = FontIndex::new([face("regular.ttf", 400, false)]);
     let refs = [
         reference("Example-Regular", 700, false),
+        reference("Example-Regular", 700, true),
         reference("Example", 400, false),
     ];
     let strict = index.resolve(&refs);
-    assert_eq!(strict.resolved.len(), 2);
-    assert!(strict.resolved.iter().all(|r| !r.matches[0].synthetic_bold));
-    let report = index.resolve_with_mode(&refs, ResolveMode::AllowStyleSynthesis);
-    assert!(report.resolved[0].matches[0].synthetic_bold);
-    assert!(!report.resolved[1].matches[0].synthetic_bold);
-    assert_eq!(
-        report.resolved[0].matches[0].matched_names[0].kind,
-        NameKind::PostScriptName
+    assert_eq!(strict.resolved.len(), 3);
+    assert!(
+        strict
+            .resolved
+            .iter()
+            .all(|r| !r.matches[0].synthetic_bold && !r.matches[0].synthetic_italic)
     );
+    let report = index.resolve_with_mode(&refs, ResolveMode::AllowStyleSynthesis);
+    let [bold, bold_italic, family] = &report.resolved[..] else {
+        panic!("{report:#?}")
+    };
+    for explicit in [bold, bold_italic] {
+        assert_eq!(
+            explicit.matches[0].selection_method,
+            SelectionMethod::PostScriptName
+        );
+        assert_eq!(
+            explicit.matches[0].matched_names[0].kind,
+            NameKind::PostScriptName
+        );
+        assert!(explicit.matches[0].synthetic_bold);
+    }
+    assert!(!bold.matches[0].synthetic_italic);
+    assert!(bold_italic.matches[0].synthetic_italic);
+    assert!(!family.matches[0].synthetic_bold);
 }

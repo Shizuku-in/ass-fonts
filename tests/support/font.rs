@@ -2,27 +2,55 @@ fn put16(bytes: &mut [u8], offset: usize, value: u16) {
     bytes[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
 }
 
-fn put32(bytes: &mut [u8], offset: usize, value: u32) {
+pub fn put32(bytes: &mut [u8], offset: usize, value: u32) {
     bytes[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
 }
 
-// A minimal synthetic TrueType font with a format 12 cmap. It is sufficient for
-// metadata and cmap tests without relying on installed or redistributable fonts.
+/// Font metadata for [`sfnt`]; `base` offsets table records inside a collection.
+pub struct Spec<'a> {
+    pub names: &'a [(u16, &'a str)],
+    pub characters: &'a [char],
+    pub weight: u16,
+    pub italic: bool,
+    pub otf: bool,
+    pub base: usize,
+}
+
+// A minimal synthetic font with a format 12 cmap. It is sufficient for metadata
+// and cmap tests without relying on installed or redistributable fonts.
+#[allow(dead_code)] // Not every test crate including this module uses it.
 pub fn font(name: &str, characters: &[char]) -> Vec<u8> {
-    let mut characters = characters.to_vec();
+    sfnt(Spec {
+        names: &[(1, name)],
+        characters,
+        weight: 400,
+        italic: false,
+        otf: false,
+        base: 0,
+    })
+}
+
+pub fn sfnt(spec: Spec) -> Vec<u8> {
+    let mut characters = spec.characters.to_vec();
     characters.sort_unstable();
     characters.dedup();
 
-    let utf16: Vec<u8> = name.encode_utf16().flat_map(u16::to_be_bytes).collect();
-    let mut naming = vec![0; 18];
-    put16(&mut naming, 2, 1);
-    put16(&mut naming, 4, 18);
-    put16(&mut naming, 6, 3);
-    put16(&mut naming, 8, 1);
-    put16(&mut naming, 10, 0x409);
-    put16(&mut naming, 12, 1);
-    put16(&mut naming, 14, utf16.len() as u16);
-    naming.extend(utf16);
+    let storage = 6 + 12 * spec.names.len();
+    let mut naming = vec![0; storage];
+    put16(&mut naming, 2, spec.names.len() as u16);
+    put16(&mut naming, 4, storage as u16);
+    for (index, (id, text)) in spec.names.iter().enumerate() {
+        let utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+        let record = 6 + index * 12;
+        let offset = naming.len() - storage;
+        put16(&mut naming, record, 3); // Windows Unicode BMP
+        put16(&mut naming, record + 2, 1);
+        put16(&mut naming, record + 4, 0x409);
+        put16(&mut naming, record + 6, *id);
+        put16(&mut naming, record + 8, utf16.len() as u16);
+        put16(&mut naming, record + 10, offset as u16);
+        naming.extend(utf16);
+    }
 
     let mut cmap = vec![0; 28 + 12 * characters.len()];
     put16(&mut cmap, 2, 1);
@@ -47,8 +75,9 @@ pub fn font(name: &str, characters: &[char]) -> Vec<u8> {
     put32(&mut maxp, 0, 0x5000);
     put16(&mut maxp, 4, (characters.len() + 1) as u16);
     let mut os2 = vec![0; 78];
-    put16(&mut os2, 4, 400);
+    put16(&mut os2, 4, spec.weight);
     put16(&mut os2, 6, 5);
+    put16(&mut os2, 62, u16::from(spec.italic));
 
     let tables = [
         (*b"OS/2", os2),
@@ -59,7 +88,12 @@ pub fn font(name: &str, characters: &[char]) -> Vec<u8> {
         (*b"name", naming),
     ];
     let mut bytes = vec![0; 12 + 16 * tables.len()];
-    put32(&mut bytes, 0, 0x10000);
+    let version = if spec.otf {
+        u32::from_be_bytes(*b"OTTO")
+    } else {
+        0x10000
+    };
+    put32(&mut bytes, 0, version);
     put16(&mut bytes, 4, tables.len() as u16);
     for (index, (tag, table)) in tables.into_iter().enumerate() {
         while !bytes.len().is_multiple_of(4) {
@@ -68,7 +102,7 @@ pub fn font(name: &str, characters: &[char]) -> Vec<u8> {
         let offset = bytes.len();
         let record = 12 + index * 16;
         bytes[record..record + 4].copy_from_slice(&tag);
-        put32(&mut bytes, record + 8, offset as u32);
+        put32(&mut bytes, record + 8, (spec.base + offset) as u32);
         put32(&mut bytes, record + 12, table.len() as u32);
         bytes.extend(table);
     }

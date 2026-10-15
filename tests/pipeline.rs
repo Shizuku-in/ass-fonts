@@ -89,81 +89,25 @@ fn normalization_aliases_deduplication_and_ambiguity() {
     );
 }
 
-// Minimal synthetic SFNTs avoid system-font dependencies and font redistribution.
-fn put16(bytes: &mut [u8], offset: usize, n: u16) {
-    bytes[offset..offset + 2].copy_from_slice(&n.to_be_bytes());
-}
-fn put32(bytes: &mut [u8], offset: usize, n: u32) {
-    bytes[offset..offset + 4].copy_from_slice(&n.to_be_bytes());
-}
+#[path = "support/font.rs"]
+mod font_fixture;
+use font_fixture::{Spec, put32};
 
 fn sfnt(name: &str, base: usize, otf: bool) -> Vec<u8> {
     styled_sfnt(name, base, otf, 400, false)
 }
 
 fn styled_sfnt(name: &str, base: usize, otf: bool, weight: u16, italic: bool) -> Vec<u8> {
-    let records = [
-        (1, name.to_owned()),
-        (4, format!("{name} Full")),
-        (6, format!("{}-PS", name.replace(' ', ""))),
-    ];
-    let storage = 6 + 12 * records.len();
-    let mut naming = vec![0; storage];
-    put16(&mut naming, 2, records.len() as u16);
-    put16(&mut naming, 4, storage as u16);
-    for (i, (id, text)) in records.into_iter().enumerate() {
-        let utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
-        let record = 6 + i * 12;
-        let offset = naming.len() - storage;
-        put16(&mut naming, record, 3); // Windows Unicode BMP
-        put16(&mut naming, record + 2, 1);
-        put16(&mut naming, record + 4, 0x409);
-        put16(&mut naming, record + 6, id);
-        put16(&mut naming, record + 8, utf16.len() as u16);
-        put16(&mut naming, record + 10, offset as u16);
-        naming.extend(utf16);
-    }
-    let mut head = vec![0; 54];
-    put16(&mut head, 18, 1000);
-    let mut hhea = vec![0; 36];
-    put32(&mut hhea, 0, 0x10000);
-    let mut maxp = vec![0; 6];
-    put32(&mut maxp, 0, 0x5000);
-    put16(&mut maxp, 4, 1);
-    let mut os2 = vec![0; 78];
-    put16(&mut os2, 4, weight);
-    put16(&mut os2, 6, 5);
-    put16(&mut os2, 62, u16::from(italic));
-    let tables = [
-        (*b"OS/2", os2),
-        (*b"head", head),
-        (*b"hhea", hhea),
-        (*b"maxp", maxp),
-        (*b"name", naming),
-    ];
-    let mut bytes = vec![0; 12 + 16 * tables.len()];
-    put32(
-        &mut bytes,
-        0,
-        if otf {
-            u32::from_be_bytes(*b"OTTO")
-        } else {
-            0x10000
-        },
-    );
-    put16(&mut bytes, 4, tables.len() as u16);
-    for (i, (tag, data)) in tables.into_iter().enumerate() {
-        while !bytes.len().is_multiple_of(4) {
-            bytes.push(0);
-        }
-        let offset = bytes.len();
-        let record = 12 + i * 16;
-        bytes[record..record + 4].copy_from_slice(&tag);
-        put32(&mut bytes, record + 8, (base + offset) as u32);
-        put32(&mut bytes, record + 12, data.len() as u32);
-        bytes.extend(data);
-    }
-    bytes
+    let full = format!("{name} Full");
+    let postscript = format!("{}-PS", name.replace(' ', ""));
+    font_fixture::sfnt(Spec {
+        names: &[(1, name), (4, &full), (6, &postscript)],
+        characters: &[],
+        weight,
+        italic,
+        otf,
+        base,
+    })
 }
 
 #[test]

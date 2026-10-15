@@ -1,7 +1,4 @@
-use ass_fonts::{
-    FontFace, FontIndex, FontName, FontReference, NameKind, ResolveMode, ResolveOptions,
-    SelectionMethod, SynthesisPolicy, WeightMatching,
-};
+use ass_fonts::{FontFace, FontIndex, FontName, FontReference, NameKind, SelectionMethod};
 
 fn record(name: &str, id: u16) -> FontName {
     FontName {
@@ -155,37 +152,6 @@ fn incomplete_or_conflicting_family_metadata_is_conservative() {
     assert_eq!(
         report.resolved[0].matches[0].selection_method,
         SelectionMethod::FamilyExact
-    );
-}
-
-#[test]
-fn options_and_compatibility_mode_agree() {
-    let index = FontIndex::new([face("regular.ttf", 400, vec![record("Common", 1)])]);
-    let refs = [request("Common", 700)];
-    let options = ResolveOptions {
-        weight_matching: WeightMatching::Exact,
-        synthesis: SynthesisPolicy {
-            bold: true,
-            italic: true,
-        },
-    };
-    let report = index.resolve_with_options(&refs, options);
-    assert_eq!(
-        report.resolved[0].matches[0].selection_method,
-        SelectionMethod::FamilySynthesis
-    );
-    assert!(report.resolved[0].matches[0].synthetic_bold);
-    assert_eq!(
-        serde_json::to_value(report).unwrap(),
-        serde_json::to_value(index.resolve_with_mode(&refs, ResolveMode::AllowStyleSynthesis))
-            .unwrap()
-    );
-    assert_eq!(
-        index
-            .resolve_with_options(&refs, ResolveOptions::default())
-            .missing
-            .len(),
-        1
     );
 }
 
