@@ -25,7 +25,7 @@ def main():
     archive = Path(metadata["target_directory"]) / "package" / f"{prefix}.crate"
     required = {
         "Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "README-zh.md",
-        "CHANGELOG.md", "FUZZING.md", "RELEASING.md", "src/lib.rs", "src/coverage.rs",
+        "CHANGELOG.md", "FUZZING.md", "src/lib.rs", "src/coverage.rs",
         "src/fonts/mod.rs", "src/fonts/index.rs", "src/fonts/resolve.rs",
         "src/fonts/scan.rs", "tests/support/font.rs", "src/subtitle.rs", "benches/pipeline.rs",
         "examples/report.rs", "examples/sample.ass",

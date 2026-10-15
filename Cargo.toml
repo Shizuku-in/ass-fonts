@@ -21,7 +21,6 @@ include = [
     "/README-zh.md",
     "/CHANGELOG.md",
     "/FUZZING.md",
-    "/RELEASING.md",
 ]
 
 [dependencies]

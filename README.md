@@ -58,15 +58,10 @@ let report = index.resolve_with_options(
 
 ## Matching and scope
 
-Matching uses internal family, full, PostScript, and related names, normalized with Unicode NFKC, lowercase conversion, whitespace normalization, and removal of the ASS vertical-font `@` prefix. Filenames are not used.
-
-References are grouped by name, weight, and italic state. Normal/bold map to 400/700; explicit `\b100`–`\b900` weights are retained. PostScript names take priority. Full names identify specific faces unless they also denote a generic family. Legacy family aliases can identify variants when a broader typographic family is recorded and all matching faces share the same weight/italic attributes. This uses name-table relationships, not suffixes such as Bold or W17.
-
-Generic families use the configured weight policy and prefer matching italic attributes (oblique counts as italic). Insufficient metadata keeps the conservative family interpretation. Specific names preserve the face's native design even when the request says 400; this resolves a font dependency, not the accuracy of the requested visual style. Requested and native attributes remain in the report. Duplicate matching files remain ambiguous. Italic synthesis requires explicit permission.
-
-`read_subtitle` accepts UTF-8 and BOM-marked UTF-16 LE/BE. For legacy encodings, decode the text first and pass it to `extract_fonts`.
-
-This library can check nominal cmap coverage, but does not simulate shaping/rendering, generate synthesized fonts, instantiate variable fonts, resolve cross-family font fallback, extract embedded fonts, or discover system font directories. Synthetic bold supports only 400→700; italic synthesis permits upright→italic. These permissions may combine and do not alter font files. Light faces are not used for synthetic bold. Supply font paths explicitly and check diagnostics for incomplete results.
+- Matches internal font names, ignoring case, whitespace, and the vertical `@` prefix. Filenames are not used.
+- Names that identify a specific face keep its native weight/italic; family names are matched by the requested weight and italic.
+- Bold (400→700) and italic synthesis are off by default; enable them with `SynthesisPolicy`.
+- `read_subtitle` accepts UTF-8 and BOM-marked UTF-16. Decode other encodings yourself and pass the text to `extract_fonts`.
 
 ## Development
 
@@ -76,9 +71,8 @@ cargo clippy --locked --all-targets -- -D warnings
 cargo bench --locked --bench pipeline
 ```
 
-The benchmarks use generated, redistributable fixtures. Font scanning measures a warmed operating-system file cache; it is not a cold-disk benchmark.
-
-See [fuzzing](FUZZING.md) for the subtitle and resolver targets, [release preparation](RELEASING.md) for the CI matrix, MSRV checks, and package audit, and [CHANGELOG.md](CHANGELOG.md) for API/JSON behavior notes. Local `real-test` fonts and subtitles are excluded from the crate package.
+- Fuzzing: [FUZZING.md](FUZZING.md)
+- Changelog: [CHANGELOG.md](CHANGELOG.md)
 
 # LICENSE
 
