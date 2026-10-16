@@ -19,7 +19,8 @@ pub struct CoverageCheck {
     pub candidate: FontFace,
     /// Number of distinct characters checked.
     pub checked_characters: usize,
-    /// Characters without a nominal cmap mapping, sorted by code point.
+    /// Characters without a nominal cmap mapping: visible characters sorted by
+    /// code point, then any checked whitespace sorted by code point.
     pub missing_characters: Vec<CharacterUsage>,
 }
 
@@ -150,16 +151,35 @@ impl CoverageReport {
     }
 }
 
+/// Options for [`check_coverage_with`].
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CoverageOptions {
+    /// Also check [`FontReference::whitespace`]. Off by default, so that a font
+    /// without, say, U+3000 is not reported as missing a visible character.
+    pub include_whitespace: bool,
+}
+
+/// Reopen selected font files and check extracted characters against each face's cmap.
+///
+/// Equivalent to [`check_coverage_with`] with default options, which check
+/// visible characters only.
+pub fn check_coverage(resolutions: &ResolveReport) -> CoverageReport {
+    check_coverage_with(resolutions, CoverageOptions::default())
+}
+
 /// Reopen selected font files and check extracted characters against each face's cmap.
 ///
 /// Font files are cached by path for the duration of this call. Variation selectors,
 /// joiners, and directional formatting controls are skipped because they do not
-/// require an independent nominal glyph. Whitespace and control characters have
-/// already been omitted by subtitle extraction.
+/// require an independent nominal glyph. Control characters have already been
+/// omitted by subtitle extraction; whitespace is checked only when requested.
 ///
 /// This does not apply font fallback or shape text. A successful result therefore
 /// establishes nominal character mapping only, not renderer-identical output.
-pub fn check_coverage(resolutions: &ResolveReport) -> CoverageReport {
+pub fn check_coverage_with(
+    resolutions: &ResolveReport,
+    options: CoverageOptions,
+) -> CoverageReport {
     let mut report = CoverageReport::default();
     let mut files = BTreeMap::<PathBuf, Result<Vec<u8>, String>>::new();
 
@@ -192,10 +212,16 @@ pub fn check_coverage(resolutions: &ResolveReport) -> CoverageReport {
                     continue;
                 }
             };
+            let whitespace: &[CharacterUsage] = if options.include_whitespace {
+                &resolution.reference.whitespace
+            } else {
+                &[]
+            };
             let checked = resolution
                 .reference
                 .characters
                 .iter()
+                .chain(whitespace)
                 .filter(|usage| requires_nominal_glyph(usage.character));
             let mut check = CoverageCheck {
                 reference: resolution.reference.clone(),

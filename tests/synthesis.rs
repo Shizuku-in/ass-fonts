@@ -26,6 +26,7 @@ fn reference(name: &str, weight: u16, italic: bool) -> FontReference {
         italic,
         lines: vec![1],
         characters: vec![],
+        ..Default::default()
     }
 }
 

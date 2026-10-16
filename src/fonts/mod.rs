@@ -2,8 +2,10 @@ mod index;
 mod resolve;
 mod scan;
 
+pub use scan::{SCAN_FORMAT_VERSION, ScanProgress, discover_font_files, scan_font_file};
+
 use crate::{FontReference, normalize_name};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::PathBuf,
@@ -12,9 +14,12 @@ use std::{
 /// Owned metadata for one face in a font file or collection.
 ///
 /// Identity is `(path, face_index)`, not the name or file contents. No font bytes
-/// are retained. Scanned names include Unicode records and Macintosh Roman ASCII;
-/// unsupported legacy encodings are skipped.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+/// are retained. Scanned names include Unicode records and Macintosh Roman ASCII.
+/// With the default `legacy-names` feature, Windows ShiftJIS/PRC/Big5/Wansung and
+/// Macintosh Roman/Japanese/Chinese/Korean records are decoded as well.
+///
+/// Scanned faces can be cached with serde; see [`SCAN_FORMAT_VERSION`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FontFace {
     /// Canonical file path when produced by [`ScanReport::scan`].
     pub path: PathBuf,
@@ -35,7 +40,7 @@ pub struct FontFace {
 }
 
 /// Semantic role of an internal alias; related OpenType IDs share a role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NameKind {
     /// Legacy, typographic, or WWS family (IDs 1, 16, 21).
@@ -53,19 +58,19 @@ pub enum NameKind {
 /// For caller-built records, keep `kind` consistent with `name_id`, or use
 /// `name_id: None` when the original ID is unknown. The index does not validate
 /// contradictory caller-supplied metadata.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct FontName {
     /// Original decoded spelling, before matching normalization.
     pub name: String,
     /// Name role used for selection and evidence reporting.
     pub kind: NameKind,
     /// Original OpenType name ID; absent for caller-supplied aliases.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name_id: Option<u16>,
 }
 
 /// A filesystem or face parsing problem encountered while scanning.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanIssue {
     /// Affected file or directory; canonicalization may not have succeeded.
     pub path: PathBuf,
@@ -76,7 +81,7 @@ pub struct ScanIssue {
 }
 
 /// Successfully parsed faces and non-fatal scan issues.
-#[derive(Debug, Default, Clone, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanReport {
     /// Faces sorted by canonical path and collection index.
     pub faces: Vec<FontFace>,

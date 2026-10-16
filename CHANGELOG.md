@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.3.0 - 2026-10-16
+
+### Added
+
+- `rewrite_font_names` replaces style `Fontname` fields and top-level `\fn` names, including in unused styles and `Comment:` events, via a callback that receives each `FontNameSite`. `@` prefixes are kept and all other bytes are preserved; invalid replacements are rejected with diagnostics.
+- `FontReference::whitespace` records whitespace per font request: `\h` as U+00A0 and `\n` as U+0020. `check_coverage_with` with `CoverageOptions { include_whitespace: true }` also checks it.
+- `FontReference::vertical` reports whether visible text used the font through an `@` name.
+- `legacy-names` feature (default): decode Windows ShiftJIS/PRC/Big5/Wansung and Macintosh Roman/Japanese/Traditional Chinese/Korean/Simplified Chinese name records. Undecodable records, including Johab, are skipped with a `ScanIssue`.
+- `encoding` feature: `decode_subtitle` honors BOMs, then UTF-8, then detects legacy encodings with `chardetng`; `read_subtitle` uses it.
+- Scan caching: `discover_font_files`, `scan_font_file`, `SCAN_FORMAT_VERSION`, and `Deserialize` for `FontFace`, `FontName`, `NameKind`, `ScanIssue`, and `ScanReport`.
+- `ScanReport::scan_with` reports `ScanProgress` after each file. The `parallel` feature scans files with rayon and produces the same report as a serial scan.
+- `FontIndex::faces` and `FontIndex::lookup`. Documented and tested alias injection through `FontIndex::new` merging.
+- `Default` for `FontReference`; `PartialEq`/`Eq` for `Diagnostic`, `ScanIssue`, and `ScanReport`.
+
+### Breaking changes
+
+- `FontReference` has new `vertical` and `whitespace` fields; struct literals need them or `..Default::default()`, and serialized output changes.
+- With the `encoding` feature, `read_subtitle` decodes legacy bytes instead of rejecting them.
+- With `legacy-names`, scanning can return more names and more issues for the same files.
+
+### Development
+
+- CI tests and lints all feature combinations and fuzzes font name rewriting.
+- Replace the Python package audit script with an equivalent shell step in CI.
+
 ## 0.2.3 - 2026-10-15
 
 ### Documentation

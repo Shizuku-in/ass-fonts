@@ -30,6 +30,8 @@ fn request(name: &str, weight: u16) -> FontReference {
         name: name.into(),
         weight,
         italic: false,
+        vertical: false,
+        whitespace: vec![],
         lines: vec![1],
         characters: vec![],
     }

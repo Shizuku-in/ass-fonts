@@ -5,11 +5,36 @@ impl FontIndex {
     ///
     /// Merges aliases for identical `(path, face_index)` pairs. If duplicate inputs
     /// disagree on weight or italic state, the first input's attributes are retained.
+    /// Callers can therefore inject extra aliases into a scanned face by appending
+    /// another `FontFace` with the same path and index, for example a fallback
+    /// name with a `_gbk` suffix used by some subtitles.
     /// Caller paths are not canonicalized; use [`ScanReport::scan`] for canonical paths.
     /// Typed records populate the alias lists, and untyped aliases receive
     /// [`NameKind::InternalName`] evidence. Candidates are ordered by path and index.
     ///
     /// The index can be reused for many subtitles and different resolution options.
+    ///
+    /// ```
+    /// use ass_fonts::{FontFace, FontIndex, FontReference};
+    /// let scanned = FontFace {
+    ///     path: "fonts/song.ttf".into(),
+    ///     face_index: 0,
+    ///     names: vec![],
+    ///     family_names: vec!["宋体".into()],
+    ///     name_records: vec![],
+    ///     weight: 400,
+    ///     italic: false,
+    /// };
+    /// let alias = FontFace {
+    ///     names: vec!["宋体_GBK".into()],
+    ///     family_names: vec![],
+    ///     ..scanned.clone()
+    /// };
+    /// let index = FontIndex::new([scanned, alias]);
+    /// assert_eq!(index.faces().len(), 1);
+    /// let reference = FontReference { name: "宋体_GBK".into(), weight: 400, ..Default::default() };
+    /// assert_eq!(index.resolve(&[reference]).resolved.len(), 1);
+    /// ```
     pub fn new(faces: impl IntoIterator<Item = FontFace>) -> Self {
         let mut merged: BTreeMap<(PathBuf, u32), FontFace> = BTreeMap::new();
         for face in faces {
@@ -111,5 +136,23 @@ impl FontIndex {
             postscript_names,
             generic_families,
         }
+    }
+
+    /// All indexed faces after alias merging, sorted by path and face index.
+    pub fn faces(&self) -> &[FontFace] {
+        &self.faces
+    }
+
+    /// Every face with any alias equal to `name` after [`normalize_name`].
+    ///
+    /// Unlike resolution, this ignores name roles and requested attributes; it is
+    /// meant for searching and manual selection. Faces are sorted by path and index.
+    pub fn lookup(&self, name: &str) -> Vec<&FontFace> {
+        self.names
+            .get(&normalize_name(name))
+            .into_iter()
+            .flatten()
+            .map(|&id| &self.faces[id])
+            .collect()
     }
 }

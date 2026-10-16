@@ -31,25 +31,52 @@ pub fn font(name: &str, characters: &[char]) -> Vec<u8> {
 }
 
 pub fn sfnt(spec: Spec) -> Vec<u8> {
+    sfnt_with_records(spec, &[])
+}
+
+/// Like [`sfnt`], appending raw `(platform, encoding, name ID, bytes)` records
+/// after the Windows Unicode records generated from `spec.names`.
+#[allow(dead_code)] // Only some test crates build legacy name records.
+pub fn sfnt_with_records(spec: Spec, raw: &[(u16, u16, u16, &[u8])]) -> Vec<u8> {
     let mut characters = spec.characters.to_vec();
     characters.sort_unstable();
     characters.dedup();
 
-    let storage = 6 + 12 * spec.names.len();
+    let mut records: Vec<(u16, u16, u16, Vec<u8>)> = spec
+        .names
+        .iter()
+        .map(|(id, text)| {
+            // Windows Unicode BMP
+            (
+                3,
+                1,
+                *id,
+                text.encode_utf16().flat_map(u16::to_be_bytes).collect(),
+            )
+        })
+        .collect();
+    records.extend(
+        raw.iter()
+            .map(|&(p, e, id, bytes)| (p, e, id, bytes.to_vec())),
+    );
+    let storage = 6 + 12 * records.len();
     let mut naming = vec![0; storage];
-    put16(&mut naming, 2, spec.names.len() as u16);
+    put16(&mut naming, 2, records.len() as u16);
     put16(&mut naming, 4, storage as u16);
-    for (index, (id, text)) in spec.names.iter().enumerate() {
-        let utf16: Vec<u8> = text.encode_utf16().flat_map(u16::to_be_bytes).collect();
+    for (index, (platform, encoding, id, bytes)) in records.into_iter().enumerate() {
         let record = 6 + index * 12;
         let offset = naming.len() - storage;
-        put16(&mut naming, record, 3); // Windows Unicode BMP
-        put16(&mut naming, record + 2, 1);
-        put16(&mut naming, record + 4, 0x409);
-        put16(&mut naming, record + 6, *id);
-        put16(&mut naming, record + 8, utf16.len() as u16);
+        put16(&mut naming, record, platform);
+        put16(&mut naming, record + 2, encoding);
+        put16(
+            &mut naming,
+            record + 4,
+            if platform == 3 { 0x409 } else { 0 },
+        );
+        put16(&mut naming, record + 6, id);
+        put16(&mut naming, record + 8, bytes.len() as u16);
         put16(&mut naming, record + 10, offset as u16);
-        naming.extend(utf16);
+        naming.extend(bytes);
     }
 
     let mut cmap = vec![0; 28 + 12 * characters.len()];

@@ -81,6 +81,8 @@ fuzz_target!(|input: Input| {
             name: text(reference.name),
             weight: reference.weight,
             italic: reference.italic,
+            vertical: false,
+            whitespace: vec![],
             lines: vec![index + 1],
             characters: vec![CharacterUsage {
                 character: reference.character,

@@ -25,3 +25,5 @@ jobs:
         run: cargo +nightly fuzz run subtitle -- -max_total_time=30 -timeout=10
       - name: Fuzz font resolution
         run: cargo +nightly fuzz run resolver -- -max_total_time=30 -timeout=10
+      - name: Fuzz font name rewriting
+        run: cargo +nightly fuzz run rewrite fuzz/corpus/subtitle -- -max_total_time=30 -timeout=10

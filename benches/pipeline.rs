@@ -60,6 +60,8 @@ fn references(count: usize, nearest: bool) -> Vec<FontReference> {
                 700
             },
             italic: index % 4 == 3,
+            vertical: false,
+            whitespace: vec![],
             lines: vec![index + 1],
             characters: vec![CharacterUsage {
                 character: 'A',
@@ -119,6 +121,8 @@ fn coverage_fixture(face_count: usize, references_per_face: usize) -> (TempDir, 
                 name: format!("Benchmark Coverage {face}"),
                 weight: 400,
                 italic: false,
+                vertical: false,
+                whitespace: vec![],
                 lines: vec![reference + 1],
                 characters: character_usage(characters, reference),
             })

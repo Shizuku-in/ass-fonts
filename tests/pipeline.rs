@@ -73,6 +73,8 @@ fn normalization_aliases_deduplication_and_ambiguity() {
             name: name.into(),
             weight: 400,
             italic: false,
+            vertical: false,
+            whitespace: vec![],
             lines: vec![1],
             characters: vec![],
         })
@@ -413,6 +415,10 @@ fn unicode_file_decoding_is_strict() {
     }
     std::fs::write(&path, [0xff, 0xfe, 0]).unwrap();
     assert!(read_subtitle(&path).is_err());
+    // With the `encoding` feature, legacy bytes are detected instead of rejected.
     std::fs::write(&path, [0xff]).unwrap();
-    assert!(read_subtitle(&path).is_err());
+    assert_eq!(
+        read_subtitle(&path).is_err(),
+        cfg!(not(feature = "encoding"))
+    );
 }

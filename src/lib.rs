@@ -8,6 +8,9 @@
 //! 4. Optionally call [`ResolveReport::check_coverage`] for nominal cmap coverage.
 //! 5. Inspect the reports together with subtitle and scanning diagnostics.
 //!
+//! [`rewrite_font_names`] replaces font names using the same parser, for example
+//! to obfuscate names before muxing subset fonts.
+//!
 //! ```no_run
 //! use ass_fonts::{FontIndex, ResolveOptions, ScanReport, SynthesisPolicy,
 //!                 WeightMatching, read_subtitle};
@@ -41,19 +44,33 @@
 //! cross-family fallback, variable-font instances, embedded font extraction, and
 //! system font directory discovery are outside scope.
 //! Reports implement [`serde::Serialize`]; enum values use snake_case in JSON.
+//!
+//! # Features
+//!
+//! - `legacy-names` (default): decode CJK legacy-encoded font name records.
+//! - `encoding`: detect and decode legacy subtitle encodings with
+//!   `decode_subtitle`; [`read_subtitle`] then uses it.
+//! - `parallel`: scan font files in parallel with rayon.
 mod coverage;
+#[cfg(feature = "encoding")]
+mod encoding;
 mod fonts;
+mod rewrite;
 mod subtitle;
+mod syntax;
 
 pub use coverage::{
-    CoverageCheck, CoverageReport, CoverageSummary, CoverageUnavailableReason, UncheckableCoverage,
-    check_coverage,
+    CoverageCheck, CoverageOptions, CoverageReport, CoverageSummary, CoverageUnavailableReason,
+    UncheckableCoverage, check_coverage, check_coverage_with,
 };
+#[cfg(feature = "encoding")]
+pub use encoding::{DecodeError, DecodedSubtitle, decode_subtitle};
 pub use fonts::{
     FontFace, FontIndex, FontName, MatchEvidence, MissingReason, NameKind, Resolution, ResolveMode,
-    ResolveOptions, ResolveReport, ScanIssue, ScanReport, SelectionMethod, SynthesisPolicy,
-    WeightMatching,
+    ResolveOptions, ResolveReport, SCAN_FORMAT_VERSION, ScanIssue, ScanProgress, ScanReport,
+    SelectionMethod, SynthesisPolicy, WeightMatching, discover_font_files, scan_font_file,
 };
+pub use rewrite::{FontNameSite, Rewritten, SiteKind, rewrite_font_names};
 pub use subtitle::{
     CharacterUsage, Diagnostic, FontReference, SubtitleFonts, extract_fonts, read_subtitle,
 };

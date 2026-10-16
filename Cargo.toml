@@ -1,6 +1,6 @@
 [package]
 name = "ass-fonts"
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.87"
 description = "Analyze and resolve font dependencies in ASS/SSA subtitles."
@@ -24,6 +24,9 @@ include = [
 ]
 
 [dependencies]
+chardetng = { version = "0.1", optional = true }
+encoding_rs = { version = "0.8", optional = true }
+rayon = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"] }
 ttf-parser = "0.25.1"
 unicode-normalization = "0.1"
@@ -31,9 +34,19 @@ walkdir = "2"
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+proptest = { version = "1", default-features = false, features = ["std"] }
 serde_json = "1"
 tempfile = "3"
 
 [[bench]]
 name = "pipeline"
 harness = false
+
+[features]
+default = ["legacy-names"]
+# Decode CJK legacy-encoded name records (Windows/Macintosh platforms).
+legacy-names = ["dep:encoding_rs"]
+# Detect and decode legacy subtitle encodings such as GBK, Big5, and Shift_JIS.
+encoding = ["dep:encoding_rs", "dep:chardetng"]
+# Scan font files in parallel with rayon.
+parallel = ["dep:rayon"]

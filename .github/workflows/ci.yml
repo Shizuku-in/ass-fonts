@@ -30,6 +30,10 @@ jobs:
         run: cargo +${{ matrix.rust }} test --locked --all-targets
       - name: Test documentation examples
         run: cargo +${{ matrix.rust }} test --locked --doc
+      - name: Test with all features
+        run: cargo +${{ matrix.rust }} test --locked --all-targets --all-features
+      - name: Test without default features
+        run: cargo +${{ matrix.rust }} test --locked --all-targets --no-default-features
 
   quality:
     runs-on: ubuntu-latest
@@ -41,6 +45,8 @@ jobs:
         run: rustup toolchain install stable --profile minimal --component rustfmt --component clippy
       - run: cargo +stable fmt --check
       - run: cargo +stable clippy --locked --all-targets -- -D warnings
+      - run: cargo +stable clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo +stable clippy --locked --all-targets --no-default-features -- -D warnings
       - name: Compile performance benchmarks
         run: cargo +stable bench --locked --bench pipeline --no-run
       - name: Compile fuzz targets
@@ -50,7 +56,7 @@ jobs:
       - name: Lint fuzz targets
         run: cargo +stable clippy --locked --manifest-path fuzz/Cargo.toml --bins -- -D warnings
       - name: Check public API documentation
-        run: cargo +stable doc --locked --no-deps
+        run: cargo +stable doc --locked --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings -D missing_docs
 
@@ -63,6 +69,26 @@ jobs:
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal
       - name: Build and audit release archive
-        run: python3 scripts/check-package.py
-        env:
-          RUSTUP_TOOLCHAIN: stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo +stable package --locked
+          files=$(cargo +stable package --locked --list)
+          allowed='^(Cargo\.(toml|toml\.orig|lock)|\.cargo_vcs_info\.json|LICENSE|README(-zh)?\.md|CHANGELOG\.md|FUZZING\.md|examples/(report\.rs|sample\.ass)|(src|tests|benches)/.+\.rs)$'
+          if unexpected=$(grep -vE "$allowed" <<<"$files"); then
+            echo "Unexpected packaged files:"; echo "$unexpected"; exit 1
+          fi
+          for file in Cargo.toml Cargo.lock LICENSE README.md README-zh.md CHANGELOG.md FUZZING.md \
+              src/lib.rs src/coverage.rs src/subtitle.rs src/syntax.rs src/rewrite.rs src/encoding.rs \
+              src/fonts/mod.rs src/fonts/index.rs src/fonts/resolve.rs src/fonts/scan.rs \
+              tests/support/font.rs benches/pipeline.rs examples/report.rs examples/sample.ass; do
+            grep -qxF "$file" <<<"$files" || { echo "Missing release file: $file"; exit 1; }
+          done
+          id=$(cargo +stable pkgid)
+          crate="target/package/ass-fonts-${id##*[#@]}.crate"
+          compressed=$(stat -c %s "$crate")
+          uncompressed=$(tar -xzOf "$crate" | wc -c)
+          if [ "$compressed" -gt 524288 ] || [ "$uncompressed" -gt 1048576 ]; then
+            echo "Package exceeded the source-only size budget; inspect its contents"; exit 1
+          fi
+          echo "Verified $crate: $(wc -l <<<"$files") files, $uncompressed bytes uncompressed, $compressed bytes compressed"

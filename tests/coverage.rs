@@ -1,6 +1,6 @@
 use ass_fonts::{
-    CoverageUnavailableReason, FontFace, FontIndex, FontReference, MissingReason, ScanReport,
-    check_coverage, extract_fonts,
+    CoverageOptions, CoverageUnavailableReason, FontFace, FontIndex, FontReference, MissingReason,
+    ScanReport, check_coverage, check_coverage_with, extract_fonts,
 };
 
 #[path = "support/font.rs"]
@@ -50,6 +50,66 @@ fn extraction_records_distinct_characters_and_source_lines() {
             .collect::<Vec<_>>(),
         ['B', '\u{200d}', '\u{fe0f}']
     );
+}
+
+#[test]
+fn whitespace_is_recorded_separately_and_vertical_use_is_flagged() {
+    let parsed = extract_fonts(&subtitle(
+        "Base",
+        "a b\\h\\N\\n\t{\\fn@Alt}\u{3000}{\\fnSpace} ",
+        "{\\fn@Alt}x　{\\p1}m 0 0 ",
+    ));
+    let usage = |name: &str| {
+        let reference = parsed.references.iter().find(|r| r.name == name).unwrap();
+        let whitespace: Vec<_> = reference
+            .whitespace
+            .iter()
+            .map(|usage| (usage.character, usage.lines.clone()))
+            .collect();
+        (reference.vertical, reference.lines.clone(), whitespace)
+    };
+    // `\h` is U+00A0, `\n` a space, and `\N` and tabs are omitted.
+    assert_eq!(
+        usage("Base"),
+        (false, vec![6], vec![(' ', vec![6]), ('\u{a0}', vec![6])])
+    );
+    // Whitespace-only runs attach to an existing reference without adding lines.
+    assert_eq!(
+        usage("@Alt"),
+        (true, vec![7], vec![('\u{3000}', vec![6, 7])])
+    );
+    // Drawing data and whitespace alone create no reference.
+    assert_eq!(parsed.references.len(), 2);
+    assert!(
+        parsed
+            .references
+            .iter()
+            .all(|r| r.characters.iter().all(|c| !c.character.is_whitespace()))
+    );
+}
+
+#[test]
+fn whitespace_coverage_is_opt_in() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("font.ttf"), font("Example", &['A', ' '])).unwrap();
+    let parsed = extract_fonts(&subtitle("Example", "A B", "A\\h"));
+    let index = FontIndex::new(ScanReport::scan([dir.path()]).faces);
+    let resolved = index.resolve(&parsed.references);
+    let visible = check_coverage(&resolved);
+    assert_eq!(visible.incomplete[0].checked_characters, 2);
+    let all = check_coverage_with(
+        &resolved,
+        CoverageOptions {
+            include_whitespace: true,
+        },
+    );
+    assert_eq!(all.incomplete[0].checked_characters, 4);
+    let missing: Vec<_> = all.incomplete[0]
+        .missing_characters
+        .iter()
+        .map(|usage| usage.character)
+        .collect();
+    assert_eq!(missing, ['B', '\u{a0}']);
 }
 
 #[test]
@@ -159,6 +219,8 @@ fn invalid_face_index_is_reported_separately_from_read_errors() {
         name: "Example".into(),
         weight: 400,
         italic: false,
+        vertical: false,
+        whitespace: vec![],
         lines: vec![1],
         characters: vec![],
     };
